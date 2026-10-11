@@ -886,7 +886,7 @@ class App(ctk.CTk):
 
         result = pipeline.run_single(pbip_path)
         if result.content_hash:
-            self.after(0, lambda h=result.content_hash, n=pbip_name: self._persist_hashes({n: h}))
+            self.after(0, lambda h=result.content_hash, k=result.hash_key: self._persist_hashes({k: h}))
         if result.success:
             now = datetime.now().strftime("%H:%M:%S")
             self.after(0, lambda: self._last_run_label.configure(

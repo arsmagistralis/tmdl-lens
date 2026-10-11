@@ -81,15 +81,26 @@ def _make_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_settings(path: str) -> dict:
+def _load_settings(path: str) -> tuple[dict, str]:
+    """
+    Load a config file. Returns (settings, error) where error is "" on
+    success, "missing" when the file does not exist, or a reason string
+    when the file exists but cannot be used.
+    """
+    if not os.path.exists(path):
+        return {}, "missing"
     try:
         with open(path, "r", encoding="utf-8") as f:
             saved = json.load(f)
-        if not isinstance(saved, dict):
-            saved = {}
-    except (OSError, json.JSONDecodeError):
-        saved = {}
-    return saved
+    except UnicodeDecodeError as e:
+        return {}, f"file is not valid UTF-8: {e}"
+    except json.JSONDecodeError as e:
+        return {}, f"file is not valid JSON: {e}"
+    except OSError as e:
+        return {}, f"file cannot be read: {e}"
+    if not isinstance(saved, dict):
+        return {}, f"expected a JSON object, got {type(saved).__name__}"
+    return saved, ""
 
 
 def _build_config(args, saved: dict) -> PipelineConfig:
@@ -113,14 +124,37 @@ def main(argv=None) -> int:
     parser = _make_parser()
     args = parser.parse_args(argv)
 
-    cfg_path = args.config
-    saved = _load_settings(cfg_path) if cfg_path else {}
-    config = _build_config(args, saved)
-
     def log(msg: str, level: str = "msg") -> None:
         if args.quiet and level in ("msg", "info"):
             return
         print(msg)
+
+    cfg_path = args.config
+    config_loaded = False
+    saved = {}
+    if cfg_path:
+        saved, load_error = _load_settings(cfg_path)
+        if load_error == "missing":
+            log(
+                f"warning: config file not found: {cfg_path} - using defaults "
+                "and CLI flags; the file will not be created",
+                "warn",
+            )
+        elif load_error:
+            log(f"error: could not load config file {cfg_path}: {load_error}", "err")
+            return 2
+        else:
+            config_loaded = True
+
+    build_source = saved
+    if config_loaded:
+        cfg_dir = os.path.dirname(os.path.abspath(cfg_path))
+        build_source = dict(saved)
+        for key in ("reports_folder", "output_folder"):
+            value = build_source.get(key)
+            if isinstance(value, str) and value and not os.path.isabs(value):
+                build_source[key] = os.path.normpath(os.path.join(cfg_dir, value))
+    config = _build_config(args, build_source)
 
     if not config.reports_folder:
         log(
@@ -148,13 +182,22 @@ def main(argv=None) -> int:
     pipeline = Pipeline(config, saved_hashes=hashes, logger=log)
     result = pipeline.run()
 
-    if result.hashes and cfg_path:
-        saved["file_hashes"] = result.hashes
+    if result.hashes and cfg_path and config_loaded:
+        old_hashes = saved.get("file_hashes")
+        if not isinstance(old_hashes, dict):
+            old_hashes = {}
+        saved["file_hashes"] = {**old_hashes, **result.hashes}
+        tmp_path = cfg_path + ".tmp"
         try:
-            with open(cfg_path, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(saved, f, indent=2)
+            os.replace(tmp_path, cfg_path)
         except OSError:
             log(f"warning: could not save content hashes to {cfg_path}", "warn")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     return 0 if result.error_count == 0 else 1
 

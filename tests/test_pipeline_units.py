@@ -1,8 +1,12 @@
 """Fragment-level tests for the pipeline helper functions."""
 
+import builtins
 import os
+import shutil
 
+from tmdl_lens import pipeline as pipeline_mod
 from tmdl_lens.pipeline import (
+    Pipeline,
     PipelineConfig,
     _build_gen_config,
     _content_hash,
@@ -10,6 +14,26 @@ from tmdl_lens.pipeline import (
     _find_pbip_files,
     _get_output_path,
 )
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SAMPLE_MODEL_DIR = os.path.join(
+    REPO_ROOT, "sample", "tmdl-lens-test-report.SemanticModel"
+)
+
+
+def _make_report(reports_dir, folder, name):
+    base = os.path.join(str(reports_dir), folder)
+    os.makedirs(base, exist_ok=True)
+    shutil.copytree(
+        SAMPLE_MODEL_DIR, os.path.join(base, f"{name}.SemanticModel")
+    )
+    with open(os.path.join(base, f"{name}.pbip"), "w", encoding="utf-8") as f:
+        f.write("")
+    return os.path.join(base, f"{name}.pbip")
+
+
+def _noop_logger(msg, level):
+    pass
 
 
 def test_find_pbip_files_recursive(tmp_path):
@@ -71,8 +95,9 @@ def test_content_hash_deterministic(tmp_path):
     (model / "a.tmdl").write_text("A", encoding="utf-8")
     (model / "b.tmdl").write_text("B", encoding="utf-8")
     cfg = PipelineConfig(reports_folder="")
-    h1 = _content_hash(str(model), cfg)
-    h2 = _content_hash(str(model), cfg)
+    out = str(tmp_path / "Sales.html")
+    h1 = _content_hash(str(model), cfg, out)
+    h2 = _content_hash(str(model), cfg, out)
     assert h1 == h2
     assert len(h1) == 64
 
@@ -82,9 +107,10 @@ def test_content_hash_changes_with_content(tmp_path):
     model.mkdir()
     (model / "a.tmdl").write_text("A", encoding="utf-8")
     cfg = PipelineConfig(reports_folder="")
-    before = _content_hash(str(model), cfg)
+    out = str(tmp_path / "Sales.html")
+    before = _content_hash(str(model), cfg, out)
     (model / "a.tmdl").write_text("B", encoding="utf-8")
-    after = _content_hash(str(model), cfg)
+    after = _content_hash(str(model), cfg, out)
     assert before != after
 
 
@@ -94,4 +120,133 @@ def test_content_hash_changes_with_config(tmp_path):
     (model / "a.tmdl").write_text("A", encoding="utf-8")
     c1 = PipelineConfig(reports_folder="", include_dax=True)
     c2 = PipelineConfig(reports_folder="", include_dax=False)
-    assert _content_hash(str(model), c1) != _content_hash(str(model), c2)
+    assert _content_hash(str(model), c1, "out") != _content_hash(str(model), c2, "out")
+
+
+def test_content_hash_changes_with_output_path(tmp_path):
+    model = tmp_path / "Sales.SemanticModel"
+    model.mkdir()
+    (model / "a.tmdl").write_text("A", encoding="utf-8")
+    cfg = PipelineConfig(reports_folder="")
+    assert _content_hash(str(model), cfg, "out1/x.html") != \
+        _content_hash(str(model), cfg, "out2/x.html")
+
+
+def test_content_hash_changes_with_version(tmp_path, monkeypatch):
+    model = tmp_path / "Sales.SemanticModel"
+    model.mkdir()
+    (model / "a.tmdl").write_text("A", encoding="utf-8")
+    cfg = PipelineConfig(reports_folder="")
+    before = _content_hash(str(model), cfg, "out/x.html")
+    monkeypatch.setattr(pipeline_mod, "__version__", "0.0.0-test")
+    after = _content_hash(str(model), cfg, "out/x.html")
+    assert before != after
+
+
+def test_changed_hash_regenerates_despite_no_overwrite(tmp_path):
+    pbip = _make_report(tmp_path, "r1", "Sales")
+    out_path = os.path.join(str(tmp_path), "r1", "Sales.html")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("stale")
+    cfg = PipelineConfig(
+        reports_folder=str(tmp_path), skip_unchanged=True, overwrite=False
+    )
+    pipeline = Pipeline(
+        cfg, saved_hashes={"r1/Sales.pbip": "deadbeef"}, logger=_noop_logger
+    )
+    single = pipeline.run_single(pbip)
+    assert single.success
+    assert not single.skipped
+
+
+def test_hash_stored_when_skip_disabled_then_used(tmp_path):
+    pbip = _make_report(tmp_path, "r1", "Sales")
+    off = PipelineConfig(
+        reports_folder=str(tmp_path), skip_unchanged=False, overwrite=True
+    )
+    first = Pipeline(off, logger=_noop_logger).run_single(pbip)
+    assert first.success
+    assert first.content_hash
+    assert first.hash_key == "r1/Sales.pbip"
+    on = PipelineConfig(
+        reports_folder=str(tmp_path), skip_unchanged=True, overwrite=False
+    )
+    second = Pipeline(
+        on, saved_hashes={first.hash_key: first.content_hash}, logger=_noop_logger
+    ).run_single(pbip)
+    assert second.skipped
+    assert second.skip_reason == "unchanged"
+
+
+def test_same_named_reports_get_distinct_hash_keys(tmp_path):
+    _make_report(tmp_path, "r1", "Sales")
+    _make_report(tmp_path, "r2", "Sales")
+    cfg = PipelineConfig(reports_folder=str(tmp_path), overwrite=True)
+    result = Pipeline(cfg, logger=_noop_logger).run()
+    assert result.error_count == 0
+    assert set(result.hashes) == {"r1/Sales.pbip", "r2/Sales.pbip"}
+    assert os.path.exists(os.path.join(str(tmp_path), "r1", "Sales.html"))
+    assert os.path.exists(os.path.join(str(tmp_path), "r2", "Sales.html"))
+
+
+def test_same_named_reports_collide_in_custom_output(tmp_path):
+    _make_report(tmp_path, "r1", "Sales")
+    _make_report(tmp_path, "r2", "Sales")
+    out = str(tmp_path / "docs")
+    cfg = PipelineConfig(
+        reports_folder=str(tmp_path), output_folder=out, overwrite=True
+    )
+    messages = []
+    result = Pipeline(cfg, logger=lambda m, l: messages.append(m)).run()
+    assert result.error_count == 2
+    assert result.success_count == 0
+    assert not os.path.exists(out) or os.listdir(out) == []
+    assert len([m for m in messages if "collision" in m and "Sales" in m]) == 2
+
+
+def test_unreadable_tmdl_errors_one_report_run_continues(tmp_path, monkeypatch):
+    _make_report(tmp_path, "r1", "Alpha")
+    _make_report(tmp_path, "r2", "Beta")
+    real_open = builtins.open
+
+    def guarded_open(file, mode="r", *args, **kwargs):
+        if "Alpha" in str(file) and str(file).endswith(".tmdl") and "r" in mode:
+            raise PermissionError(13, "simulated lock", str(file))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+    cfg = PipelineConfig(reports_folder=str(tmp_path), overwrite=True)
+    result = Pipeline(cfg, logger=_noop_logger).run()
+    assert result.error_count == 1
+    assert result.success_count == 1
+    assert list(result.hashes) == ["r2/Beta.pbip"]
+
+
+def test_three_runs_only_edited_report_regenerates(tmp_path):
+    _make_report(tmp_path, "r1", "Alpha")
+    _make_report(tmp_path, "r2", "Beta")
+    cfg = PipelineConfig(
+        reports_folder=str(tmp_path), skip_unchanged=True, overwrite=False
+    )
+
+    run1 = Pipeline(cfg, logger=_noop_logger).run()
+    assert run1.success_count == 2
+    assert run1.error_count == 0
+
+    run2 = Pipeline(cfg, saved_hashes=dict(run1.hashes), logger=_noop_logger).run()
+    assert run2.skipped_count == 2
+    assert all(r.skip_reason == "unchanged" for r in run2.results)
+
+    model_file = os.path.join(
+        str(tmp_path), "r1", "Alpha.SemanticModel", "definition", "model.tmdl"
+    )
+    with open(model_file, "a", encoding="utf-8") as f:
+        f.write("\n// trigger change\n")
+
+    run3 = Pipeline(cfg, saved_hashes=dict(run1.hashes), logger=_noop_logger).run()
+    assert run3.success_count == 1
+    assert run3.skipped_count == 1
+    by_name = {r.report_name: r for r in run3.results}
+    assert by_name["Alpha"].success
+    assert by_name["Beta"].skipped
+    assert by_name["Beta"].skip_reason == "unchanged"

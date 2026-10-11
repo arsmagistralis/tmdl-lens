@@ -22,12 +22,12 @@
 
 **Pipeline (`pipeline.py`)**
 - Pure-Python orchestration with no GUI/thread dependencies: finds `.pbip` files, runs parse → resolve → generate per report, returns `SingleResult`/`PipelineResult`.
-- `skip_unchanged` computes a SHA256 of each report's `.tmdl` files plus the generator-relevant config (`include_dax`, `output_format`, `owner`, `team`, `refresh_schedule`); `run_single` skips before parsing when that hash matches `saved_hashes` and the output file already exists. The app persists the hashes to `config.json` under `file_hashes`.
+- `skip_unchanged` computes a SHA256 of each report's `.tmdl` files plus the generator-relevant config (`include_dax`, `output_format`, `owner`, `team`, `refresh_schedule`), the report's output path and the tool version; the hash is computed on every run inside the per-report error handling. `run_single` skips with reason `unchanged` when the hash stored for the report's path relative to `reports_folder` (forward slashes) matches and the output file already exists; a missing or differing hash regenerates even when `overwrite` is off. Hashes are stored only after a successful write, keyed by that relative path. The app persists the hashes to `config.json` under `file_hashes`.
 
 **CLI (`cli.py`)**
 - argparse-based headless interface over `Pipeline`, no GUI imports. Installed as the `tmdl-lens` console command via `pyproject.toml` `[project.scripts]`.
 - Exit codes: 0 success, 1 report failure or missing reports folder, 2 missing `--reports-folder`.
-- Reads settings from a `config.json` only when `--config` is passed; that is also the only way `--skip-unchanged` hashes persist between runs (CLI flags override file values). The standard config.json location belongs to the GUI, so the CLI never writes there implicitly.
+- Reads settings from a `config.json` only when `--config` is passed; that is also the only way `--skip-unchanged` hashes persist between runs (CLI flags override file values). A missing config file logs a warning and is never created; a file that exists but does not parse (BOM, invalid JSON, non-object JSON, non-UTF-8) is an error with exit code 2 and is never written. Relative `reports_folder`/`output_folder` values from the file resolve against the config file's folder. Write-back merges `file_hashes` into the loaded settings and replaces the file atomically. The standard config.json location belongs to the GUI, so the CLI never writes there implicitly.
 
 **Config file - one file**
 - `config.json` - program settings (output format, paths, watcher) plus optional documentation metadata (owner, team, refresh schedule) and `skip_unchanged` content hashes (`file_hashes`). Lives next to executable or repo root.

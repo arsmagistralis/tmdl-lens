@@ -90,7 +90,7 @@ tmdl-lens --reports-folder C:\path\to\reports
 tmdl-lens -r C:\path\to\reports -o docs --format html --overwrite
 ```
 
-Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing. Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs.
+Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing or the file passed to `--config` exists but cannot be parsed. Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs. A `--config` path that does not exist is warned about and not created; relative paths inside the config resolve against the config file's folder. With `--skip-unchanged`, a report whose content changed is regenerated even when `--overwrite` is off.
 
 ---
 
@@ -121,7 +121,8 @@ change and requires a new major version, announced in the GitHub release notes.
 `--owner`, `--team`, `--refresh-schedule`, `--config`, `-q` / `--quiet`.
 
 **Exit codes:** `0` success; `1` a report failed or the reports folder does
-not exist; `2` `--reports-folder` is missing.
+not exist; `2` `--reports-folder` is missing or the `--config` file exists
+but cannot be parsed.
 
 **`config.json` keys:** `reports_folder`, `output_folder`, `output_format`,
 `overwrite_readme`, `include_dax`, `skip_unchanged`, `watch_debounce`,

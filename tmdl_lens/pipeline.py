@@ -21,6 +21,7 @@ from typing import Callable, Optional
 from tmdl_lens.tmdl_parser import parse_semantic_model
 from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.readme_generator import generate_readme, generate_html
+from tmdl_lens.version import __version__
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ class SingleResult:
     table_count: int = 0
     measure_count: int = 0
     content_hash: str = ""
+    hash_key: str = ""
 
 
 @dataclass
@@ -123,7 +125,7 @@ def _build_gen_config(report_name: str, config: PipelineConfig) -> dict:
     }
 
 
-def _content_hash(model_dir: str, config: PipelineConfig) -> str:
+def _content_hash(model_dir: str, config: PipelineConfig, out_path: str) -> str:
     """SHA256 of the report's TMDL content plus generator-relevant config."""
     h = hashlib.sha256()
     tmdl_files = []
@@ -146,6 +148,8 @@ def _content_hash(model_dir: str, config: PipelineConfig) -> str:
             "owner":            config.owner,
             "team":             config.team,
             "refresh_schedule": config.refresh_schedule,
+            "output_path":      out_path,
+            "tool_version":     __version__,
         },
         sort_keys=True,
     )
@@ -204,20 +208,42 @@ class Pipeline:
                 "warn",
             )
 
-        self.logger(f"found {len(runnable)} report(s)", "ok")
+        collisions: dict[str, list[str]] = {}
+        if self.config.output_folder:
+            by_name: dict[str, list[str]] = defaultdict(list)
+            for p in runnable:
+                by_name[os.path.splitext(os.path.basename(p))[0]].append(p)
+            collisions = {n: ps for n, ps in by_name.items() if len(ps) > 1}
+        processable = [
+            p for p in runnable
+            if os.path.splitext(os.path.basename(p))[0] not in collisions
+        ]
+
+        for name in sorted(collisions):
+            for p in sorted(collisions[name]):
+                self.logger(
+                    f"error: output collision - {p} and another report named "
+                    f"\"{name}\" would both write to "
+                    f"{os.path.join(self.config.output_folder, name)} - rename "
+                    "one report or run without --output-folder",
+                    "err",
+                )
+
+        self.logger(f"found {len(processable)} report(s)", "ok")
 
         result = PipelineResult(total_count=len(runnable))
-        for pbip_path in runnable:
+        for pbip_path in processable:
             single = self.run_single(pbip_path)
             result.results.append(single)
             if single.content_hash:
-                result.hashes[single.report_name] = single.content_hash
+                result.hashes[single.hash_key] = single.content_hash
             if single.success:
                 result.success_count += 1
             elif single.skipped:
                 result.skipped_count += 1
             else:
                 result.error_count += 1
+        result.error_count += sum(len(ps) for ps in collisions.values())
 
         self.logger(
             f"done - {result.success_count} written" + (
@@ -241,22 +267,27 @@ class Pipeline:
         out_path = _get_output_path(
             pbip_dir, pbip_name, self.config.output_format, self.config.output_folder
         )
+        hash_key = os.path.relpath(
+            pbip_path, self.config.reports_folder or os.curdir
+        ).replace(os.sep, "/")
 
-        current_hash = ""
-        if self.config.skip_unchanged:
-            current_hash = _content_hash(model_dir, self.config)
-            if self.saved_hashes.get(pbip_name) == current_hash and os.path.exists(out_path):
-                self.logger(f"{pbip_name} - skipped (unchanged)", "msg")
-                return SingleResult(report_name=pbip_name, skipped=True,
-                                    skip_reason="unchanged")
-
-        if os.path.exists(out_path) and not self.config.overwrite:
-            self.logger(f"{pbip_name} - skipped (file exists)", "msg")
-            return SingleResult(report_name=pbip_name, skipped=True,
-                                skip_reason="file exists")
-
-        self.logger(f"-> {pbip_name}", "msg")
         try:
+            current_hash = _content_hash(model_dir, self.config, out_path)
+
+            if self.config.skip_unchanged:
+                if self.saved_hashes.get(hash_key) == current_hash \
+                        and os.path.exists(out_path):
+                    self.logger(f"{pbip_name} - skipped (unchanged)", "msg")
+                    return SingleResult(report_name=pbip_name, skipped=True,
+                                        skip_reason="unchanged",
+                                        hash_key=hash_key)
+            elif os.path.exists(out_path) and not self.config.overwrite:
+                self.logger(f"{pbip_name} - skipped (file exists)", "msg")
+                return SingleResult(report_name=pbip_name, skipped=True,
+                                    skip_reason="file exists",
+                                    hash_key=hash_key)
+
+            self.logger(f"-> {pbip_name}", "msg")
             self.logger("  parsing TMDL...", "msg")
             model = parse_semantic_model(model_dir, pbip_name)
 
@@ -288,8 +319,10 @@ class Pipeline:
                 table_count=table_count,
                 measure_count=measure_count,
                 content_hash=current_hash,
+                hash_key=hash_key,
             )
 
         except Exception as e:
             self.logger(f"  error: {e}", "err")
-            return SingleResult(report_name=pbip_name, error=str(e))
+            return SingleResult(report_name=pbip_name, error=str(e),
+                                hash_key=hash_key)
