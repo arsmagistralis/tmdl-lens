@@ -3,17 +3,29 @@
 **TMDL parser (`tmdl_parser.py`)**
 - Core structure parsing goes through `_parse_tree()`, which builds a tree of `TmdlNode` from indentation. Nested TMDL structure is parsed only this way; regex is used solely to locate block boundaries.
 - `_extract_blocks()` is a block-boundary locator only (finds where a `column`/`measure`/`calculationItem` block starts and ends by indentation). It does not parse the block's internal structure.
-- `_classify_m_content()` classifies a partition in a fixed order: scalar helper, then the specific shapes (transform functions, hardcoded and embedded data, derived references), and the generic connector match last. Any `Namespace.Function(` call outside the M standard library and the known transform functions is treated as a connector.
-- M derivation in `_classify_m_content()` also recognizes a first `let` binding
-  that assigns a named query to any variable (`wb = #"shared-mapping-source"`),
-  quoted references classifying as `derived` and bare as `derived_table`.
+- `_classify_m_content()` classifies M (comments stripped) with a fixed precedence; the first rule that fires wins, and every result records `classification_reason`:
+
+  | # | Rule | `source_type` |
+  |---|---|---|
+  | 1 | `PBI_ResultType` is `Text`, `Number`, `Date`, `DateTime` or `Boolean` | `scalar_helper` |
+  | 2 | `#table(` or `Table.FromRows(` present | `hardcoded` / `embedded` |
+  | 3 | any `Namespace.Function(` call in the whole block outside the M standard library (`_STDLIB_NAMESPACES`) and `_TRANSFORM_FNS`; the first such call in source order is the connector | `connector` |
+  | 4 | `Table.Combine({...})` / `Table.Append({...})` whose items resolve to queries: `#"name"`, a bare name, or a step of the same block assigned `#"name"`; other local steps are dropped | `table_combine` |
+  | 5 | the first step references a query: `Source = #"x"`, `Source = X`, or a first `let` binding `a = #"x"` / `a = X` | `derived` (quoted) / `derived_table` (bare) |
+  | 6 | no query reference, and the block builds a table from scratch | `generated` |
+  | 7 | none of the above | `unknown` |
+
+  `builds_table` is set on every result when the block calls a scratch builder (`List.Generate`, `List.Dates`, `List.DateTimes`, `List.Numbers`, `Table.FromList`, `Table.FromRecords`, `Table.FromColumns`). Real queries use these as transformations too, so a query reference in rule 5 always wins over them.
+
+  Function versus table is decided before this, in `_classify_expression()`: `PBI_ResultType = Function` or a body that starts with a function signature (optionally typed, `(x as text) as table =>`) is `function_def`.
 - Adding a new connector with custom detail extraction: add a branch to `_extract_connector_details()` in `tmdl_parser.py`, add an entry to `CONNECTOR_TYPE_LABEL` in `source_resolver.py`. That dict is the only source of connector labels - `readme_generator.py` imports it, so there is no second copy to keep in sync. Generic connectors with no custom branch still get classified and labeled - the custom branch is only needed to extract extra detail fields (server, database, url, etc.).
-- `_SOURCE_TYPE_LABEL` in `readme_generator.py` is a separate axis: it names non-connector source types (`hardcoded`, `embedded`, `table_combine`, `dynamic`, `unresolved`, `function_def`, `scalar_helper`). Extend it only when a new `source_type` value is introduced.
+- `_SOURCE_TYPE_LABEL` in `readme_generator.py` is a separate axis: it names non-connector source types (`hardcoded`, `embedded`, `table_combine`, `dynamic`, `unresolved`, `function_def`, `scalar_helper`, `generated`). Extend it only when a new `source_type` value is introduced.
 - M comment stripping (`_strip_m_comments`) must run before any connector detection.
 
 **Source resolver (`source_resolver.py`)**
 - Three-tier resolution: terminal connectors (tier 1) → derived/custom_function chains (tier 2) → inline table sources (tier 3).
-- Terminal types listed in `_TERMINAL_TYPES` - chain walking stops there.
+- Terminal types listed in `_TERMINAL_TYPES` (including `table_combine` and `generated`) - chain walking stops there.
+- A `derived` expression or table whose parent is an M parameter or a `scalar_helper` is not copied from that parent: it resolves as `generated` when its `builds_table` is true (a calendar seeded from a start date), otherwise as unresolved with the reason `first step references parameter '<name>'` or `first step references scalar helper '<name>'`. An `unknown` expression reports its `classification_reason` as the unresolved reason.
 - `resolve_sources()` does multiple passes to handle chains where derived expressions reference other derived expressions.
 - Shared expressions or inline M that reference a loaded table resolve from the
   model's own tables: tables whose partition is a `source_ref` pointer act as

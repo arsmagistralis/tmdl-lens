@@ -388,7 +388,7 @@ Use tmdl-lens to provide a manual label for each.
 
 | Expression | Reason |
 |---|---|
-| `source-via-custom-function` | Unclassified source type: unknown |
+| `source-via-custom-function` | no connector, combine or query reference found |
 
 ---
 

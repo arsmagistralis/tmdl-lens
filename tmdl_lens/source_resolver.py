@@ -86,6 +86,7 @@ _TERMINAL_TYPES = {
     "hardcoded", "embedded",
     "dynamic", "unresolved",
     "function_def", "scalar_helper",
+    "table_combine", "generated",
 }
 
 # (namespace, function) -> short display label for the Source Type column
@@ -185,9 +186,11 @@ def _build_label(expr: SourceExpression, params: dict[str, str]) -> str:
 
         # 7. Excel (SharePoint)
         if (ns, func) == ("Excel", "Workbook"):
+            sheet = f" -> {expr.sheet_name}" if expr.sheet_name else ""
             if expr.file_name:
-                sheet = f" -> {expr.sheet_name}" if expr.sheet_name else ""
-                return f"Excel (SharePoint) -> {expr.file_name}{sheet}"
+                return f"Excel (local) -> {expr.file_name}{sheet}"
+            elif expr.url:
+                return f"Excel (SharePoint) -> {expr.url}{sheet}"
             elif expr.sheet_name:
                 return f"Excel (SharePoint) -> [dynamic] -> {expr.sheet_name}"
             else:
@@ -333,7 +336,10 @@ def resolve_sources(
         for expr in unresolved_tier2:
             if expr.source_type == "derived":
                 parent_name = expr.derived_from
-                if parent_name in resolved:
+                scalar_rs = _scalar_parent_resolution(expr.name, expr, resolved, params)
+                if scalar_rs is not None:
+                    resolved[expr.name] = scalar_rs
+                elif parent_name in resolved:
                     resolved[expr.name] = _derived_copy(expr.name, parent_name, resolved[parent_name])
                 elif parent_name not in expr_map:
                     if parent_name in model_table_names:
@@ -430,8 +436,9 @@ def resolve_sources(
         elif expr.source_type in ("function_def", "scalar_helper"):
             resolved[expr.name] = _from_expr(expr, params, tier=1)
         else:
+            reason = expr.classification_reason if expr.source_type == "unknown" else ""
             resolved[expr.name] = _unresolved(
-                expr.name, f"Unclassified source type: {expr.source_type}"
+                expr.name, reason or f"Unclassified source type: {expr.source_type}"
             )
 
     for table_name in inline_map:
@@ -460,11 +467,11 @@ def _resolve_inline(
     if t in _TERMINAL_TYPES:
         return _from_expr(expr, params, tier=1)
 
-    if t == "table_combine":
-        return _from_expr(expr, params, tier=1)
-
     if t in ("derived", "derived_table"):
         parent_name = expr.derived_from
+        scalar_rs = _scalar_parent_resolution(table_name, expr, resolved, params)
+        if scalar_rs is not None:
+            return scalar_rs
         if parent_name in resolved:
             return _derived_copy(table_name, parent_name, resolved[parent_name])
         anchor = table_ref.get(parent_name)
@@ -488,6 +495,38 @@ def _resolve_inline(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _scalar_parent_reason(
+    parent_name: str,
+    resolved: dict[str, ResolvedSource],
+    params: dict[str, str],
+) -> str:
+    if parent_name in params:
+        return f"first step references parameter '{parent_name}'"
+    parent = resolved.get(parent_name)
+    if parent is not None and parent.source_type == "scalar_helper":
+        return f"first step references scalar helper '{parent_name}'"
+    return ""
+
+
+def _scalar_parent_resolution(
+    name: str,
+    expr: SourceExpression,
+    resolved: dict[str, ResolvedSource],
+    params: dict[str, str],
+) -> Optional[ResolvedSource]:
+    reason = _scalar_parent_reason(expr.derived_from, resolved, params)
+    if not reason:
+        return None
+    if expr.builds_table:
+        return ResolvedSource(
+            expression_name=name,
+            source_type="generated",
+            resolution_tier=1,
+            label=_build_label(SourceExpression(name=name, source_type="generated"), params),
+        )
+    return _unresolved(name, reason)
+
 
 def _terminal_label(rs: ResolvedSource) -> str:
     return rs.label

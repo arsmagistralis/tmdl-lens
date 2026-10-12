@@ -828,3 +828,169 @@ def test_parse_functions_empty_file(tmp_path):
     path.write_text(content, encoding="utf-8")
     functions = _parse_functions(str(path))
     assert functions == []
+
+
+def test_classify_connector_wins_over_combine_of_local_steps():
+    m = (
+        'let\n'
+        '    Source = SharePoint.Files("https://example.com/sites/x", [ApiVersion = 15]),\n'
+        '    StepOne = Table.SelectRows(Source, each [Extension] = ".csv"),\n'
+        '    StepTwo = Table.SelectRows(Source, each [Extension] = ".txt"),\n'
+        '    Combined = Table.Combine({StepOne, StepTwo})\n'
+        'in\n'
+        '    Combined'
+    )
+    expr = _classify_m_content(m, "t")
+    assert expr.source_type == "connector"
+    assert (expr.connector_namespace, expr.connector_function) == ("SharePoint", "Files")
+    assert expr.sharepoint_url == "https://example.com/sites/x"
+    assert expr.classification_reason == "connector call SharePoint.Files"
+
+
+def test_classify_combine_maps_step_aliases_to_queries():
+    m = (
+        'let\n'
+        '    Source = #"q-a",\n'
+        '    other = #"q-b",\n'
+        '    Combined = Table.Combine({Source, other})\n'
+        'in\n'
+        '    Combined'
+    )
+    expr = _classify_m_content(m, "t")
+    assert expr.source_type == "table_combine"
+    assert expr.combine_sources == ["q-a", "q-b"]
+    assert expr.classification_reason == "combine of 2 queries"
+
+
+def test_classify_combine_of_local_steps_only_is_not_a_combine():
+    m = (
+        'let\n'
+        '    StepOne = Table.SelectRows(#"q-a", each [x] = 1),\n'
+        '    StepTwo = Table.SelectRows(StepOne, each [x] = 2),\n'
+        '    Combined = Table.Combine({StepOne, StepTwo})\n'
+        'in\n'
+        '    Combined'
+    )
+    expr = _classify_m_content(m, "t")
+    assert expr.source_type != "table_combine"
+    assert expr.combine_sources == []
+
+
+def test_classify_native_query_over_redshift():
+    m = 'let s = Value.NativeQuery(AmazonRedshift.Database("h", "db"), "select 1") in s'
+    expr = _classify_m_content(m, "t")
+    assert expr.source_type == "connector"
+    assert (expr.connector_namespace, expr.connector_function) == ("AmazonRedshift", "Database")
+    assert expr.is_native_query is True
+    assert expr.native_query == "select 1"
+
+
+def test_classify_excel_local_file():
+    m = 'let s = Excel.Workbook(File.Contents("D:\\Data\\x.xlsx"), true) in s'
+    expr = _classify_m_content(m, "t")
+    assert (expr.connector_namespace, expr.connector_function) == ("Excel", "Workbook")
+    assert expr.file_name == "D:\\Data\\x.xlsx"
+    assert expr.url == ""
+
+
+def test_classify_excel_web_url():
+    m = 'let s = Excel.Workbook(Web.Contents("https://example.com/x.xlsx"), true) in s'
+    expr = _classify_m_content(m, "t")
+    assert (expr.connector_namespace, expr.connector_function) == ("Excel", "Workbook")
+    assert expr.file_name == ""
+    assert expr.url == "https://example.com/x.xlsx"
+
+
+def test_classify_calendar_alias_keeps_reference_and_flags_builds_table():
+    m = (
+        'let\n'
+        '    #"start-date" = #"calendar-start",\n'
+        '    Dates = List.Generate(() => #"start-date", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
+        '    Calendar = Table.FromList(Dates, Splitter.SplitByNothing())\n'
+        'in\n'
+        '    Calendar'
+    )
+    expr = _classify_m_content(m, "Calendar")
+    assert expr.source_type == "derived"
+    assert expr.derived_from == "calendar-start"
+    assert expr.builds_table is True
+
+
+def test_classify_generated_without_query_reference():
+    m = (
+        'let\n'
+        '    Dates = List.Dates(#date(2030, 1, 1), 31, #duration(1, 0, 0, 0)),\n'
+        '    Calendar = Table.FromList(Dates, Splitter.SplitByNothing())\n'
+        'in\n'
+        '    Calendar'
+    )
+    expr = _classify_m_content(m, "Calendar")
+    assert expr.source_type == "generated"
+    assert expr.builds_table is True
+    assert expr.classification_reason == "generated in M"
+
+
+def test_classify_reference_wins_over_scratch_builders():
+    builders = [
+        "Table.FromRecords({[a = 1]})",
+        "List.Numbers(1, 3)",
+        "List.Generate(() => 0, each _ < 3, each _ + 1)",
+    ]
+    for builder in builders:
+        m = (
+            'let\n'
+            '    Source = #"real-query",\n'
+            f'    Extra = {builder},\n'
+            '    Result = Table.SelectRows(Source, each true)\n'
+            'in\n'
+            '    Result'
+        )
+        expr = _classify_m_content(m, "t")
+        assert expr.source_type == "derived", builder
+        assert expr.derived_from == "real-query", builder
+        assert expr.builds_table is True, builder
+
+
+def test_classify_typed_function_expression():
+    block = (
+        'fnLoad = (x as text) as table =>\n'
+        '\t\tlet\n'
+        '\t\t    s = Sql.Database("srv", "db")\n'
+        '\t\tin\n'
+        '\t\t    s\n'
+    )
+    expr = _classify_expression(block, "fnLoad")
+    assert expr.source_type == "function_def"
+    assert expr.classification_reason == "function signature"
+
+
+def test_classify_connector_namespace_with_digits():
+    db2 = _classify_m_content('let s = DB2.Database("h", "db") in s', "t")
+    assert (db2.source_type, db2.connector_namespace, db2.connector_function) == ("connector", "DB2", "Database")
+    assert db2.server == "h"
+    d365 = _classify_m_content('let s = Dynamics365.FinanceAndOperations("https://example.com") in s', "t")
+    assert (d365.source_type, d365.connector_namespace) == ("connector", "Dynamics365")
+    assert d365.url == "https://example.com"
+
+
+def test_classify_every_exit_sets_a_reason():
+    contents = [
+        ("let x = 1 in x", "Number"),
+        ('#table({"a"}, {{1}})', ""),
+        ("Table.FromRows({{1}})", ""),
+        ('let s = Sql.Database("srv", "db") in s', ""),
+        ('let s = Table.Combine({#"a", #"b"}) in s', ""),
+        ("let l = List.Numbers(1, 3), t = Table.FromList(l) in t", ""),
+        ('let Source = #"base" in Source', ""),
+        ("let x = SomeUnknownThing(y) in x", ""),
+    ]
+    for content, result_type in contents:
+        assert _classify_m_content(content, "t", result_type).classification_reason != ""
+    blocks = [
+        ('p = "x" meta [IsParameterQuery=true, Type="Text"]', "p"),
+        ("f = (x) => x\n\tannotation PBI_ResultType = Function", "f"),
+        ("s = 1\n\tannotation PBI_ResultType = Number", "s"),
+        ('q = let s = Sql.Database("srv", "db") in s', "q"),
+    ]
+    for block, name in blocks:
+        assert _classify_expression(block, name).classification_reason != ""
