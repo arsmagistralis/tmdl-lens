@@ -73,6 +73,8 @@ python main.py
 4. Press **Run Now** to generate documentation for all reports
 5. Enable **Watch for TMDL changes** to auto-regenerate on every save
 
+Each report's semantic model folder is found in this order: the report listed in the `.pbip` file's `artifacts`, then that report's `definition.pbir` (`datasetReference` `byPath`), then a `<pbip name>.SemanticModel` folder next to the `.pbip` as a fallback when the first two are absent. A report whose `definition.pbir` uses `byConnection` is skipped, because it has no local model, and so is a `byPath` reference to a missing folder. A model folder without a `definition/` TMDL folder (for example a `model.bim` project) is skipped with a message, and an existing output file is left untouched.
+
 If no output folder is set, each `README.md` is written next to its `.pbip` file. If a separate output folder is set, each report gets its own named subfolder inside it - for example `docs/SalesReport/README.md`, `docs/FinanceReport/README.md` - so multiple reports never collide.
 
 Optional documentation metadata (owner, team, refresh schedule) is set in the **Configure** tab and stored in `config.json`: next to the executable for the standalone app, in the repository root when run from source, and in `%APPDATA%\tmdl-lens` on Windows or `~/.config/tmdl-lens` elsewhere for a pip install. A pip install that finds no file there copies an older `config.json` from its package folder once and leaves the old file in place. Values left blank are omitted from the generated output.
@@ -135,7 +137,8 @@ exact wording or layout of the generated HTML/Markdown (best effort).
 ## Limitations
 
 - Import-mode PBIP reports only. Live Connection, Direct Lake and other
-  models without a `definition/` TMDL folder are not documented.
+  models without a `definition/` TMDL folder are not documented; such a
+  report is skipped with a message naming the reason.
 - Connectors are detected from the query text. Known connectors get a
   dedicated label; anything else is shown with its Power Query namespace and
   function and is meant to be labelled manually.

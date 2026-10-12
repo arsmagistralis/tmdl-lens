@@ -114,6 +114,65 @@ def _get_output_path(
     return os.path.join(pbip_dir, out_filename)
 
 
+def _read_json(path: str):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _report_dir(pbip_dir: str, pbip_data) -> str:
+    if not isinstance(pbip_data, dict):
+        return ""
+    artifacts = pbip_data.get("artifacts")
+    if not isinstance(artifacts, list):
+        return ""
+    for artifact in artifacts:
+        report = artifact.get("report") if isinstance(artifact, dict) else None
+        if isinstance(report, dict) and isinstance(report.get("path"), str):
+            return os.path.join(pbip_dir, report["path"])
+    return ""
+
+
+def _locate_model(pbip_path: str) -> tuple[str, str]:
+    """
+    Find the semantic model folder of one .pbip report. Returns
+    (model_dir, problem); exactly one is non-empty. Precedence: the .pbip
+    report artifact, then that report's definition.pbir datasetReference,
+    then the <pbip name>.SemanticModel guess.
+    """
+    pbip_dir = os.path.dirname(pbip_path)
+    pbip_name = os.path.splitext(os.path.basename(pbip_path))[0]
+
+    report_dir = _report_dir(pbip_dir, _read_json(pbip_path))
+    pbir = _read_json(os.path.join(report_dir, "definition.pbir")) if report_dir else None
+    reference = pbir.get("datasetReference") if isinstance(pbir, dict) else None
+    if isinstance(reference, dict):
+        by_path = reference.get("byPath")
+        if isinstance(by_path, dict) and isinstance(by_path.get("path"), str):
+            target = os.path.normpath(os.path.join(report_dir, by_path["path"]))
+            if os.path.isdir(target):
+                return target, ""
+            return "", f"definition.pbir points to a missing folder: {by_path['path']}"
+        if "byConnection" in reference:
+            return "", "report uses a live connection (byConnection), no local semantic model"
+
+    guess = os.path.join(pbip_dir, f"{pbip_name}.SemanticModel")
+    if os.path.isdir(guess):
+        return guess, ""
+    return "", "no semantic model folder"
+
+
+def _model_problem(model_dir: str) -> str:
+    """Return "" when the model folder holds a TMDL definition/ folder."""
+    if os.path.isdir(os.path.join(model_dir, "definition")):
+        return ""
+    if os.path.exists(os.path.join(model_dir, "model.bim")):
+        return "model.bim (TMSL) is not supported, save the project with TMDL"
+    return "no definition folder"
+
+
 def _build_gen_config(report_name: str, config: PipelineConfig) -> dict:
     """Build the generator config dict for one report."""
     return {
@@ -257,12 +316,21 @@ class Pipeline:
         """Process one .pbip file. Returns a SingleResult."""
         pbip_dir    = os.path.dirname(pbip_path)
         pbip_name   = os.path.splitext(os.path.basename(pbip_path))[0]
-        model_dir   = os.path.join(pbip_dir, f"{pbip_name}.SemanticModel")
+        model_dir, problem = _locate_model(pbip_path)
+        problem = problem or _model_problem(model_dir)
 
-        if not os.path.isdir(model_dir):
-            self.logger(f"{pbip_name} - no SemanticModel folder", "warn")
+        if problem:
+            self.logger(f"{pbip_name} - skipped: {problem}", "warn")
             return SingleResult(report_name=pbip_name, skipped=True,
-                                skip_reason="no SemanticModel folder")
+                                skip_reason=problem)
+
+        guess = os.path.join(pbip_dir, f"{pbip_name}.SemanticModel")
+        model_note = ""
+        if os.path.normcase(os.path.normpath(model_dir)) != os.path.normcase(os.path.normpath(guess)):
+            try:
+                model_note = os.path.relpath(model_dir, pbip_dir).replace(os.sep, "/")
+            except ValueError:
+                model_note = model_dir
 
         out_path = _get_output_path(
             pbip_dir, pbip_name, self.config.output_format, self.config.output_folder
@@ -288,6 +356,8 @@ class Pipeline:
                                     hash_key=hash_key)
 
             self.logger(f"-> {pbip_name}", "msg")
+            if model_note:
+                self.logger(f"  model: {model_note} (definition.pbir)", "msg")
             self.logger("  parsing TMDL...", "msg")
             model = parse_semantic_model(model_dir, pbip_name)
 

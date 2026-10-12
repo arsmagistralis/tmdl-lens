@@ -1,6 +1,7 @@
 """Fragment-level tests for the pipeline helper functions."""
 
 import builtins
+import json
 import os
 import shutil
 
@@ -250,3 +251,127 @@ def test_three_runs_only_edited_report_regenerates(tmp_path):
     assert by_name["Alpha"].success
     assert by_name["Beta"].skipped
     assert by_name["Beta"].skip_reason == "unchanged"
+
+
+def _write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def _make_project(base, pbip_name, report_folder, reference):
+    pbip = os.path.join(str(base), f"{pbip_name}.pbip")
+    _write_json(pbip, {
+        "version": "1.0",
+        "artifacts": [{"report": {"path": report_folder}}],
+        "settings": {},
+    })
+    _write_json(
+        os.path.join(str(base), report_folder, "definition.pbir"),
+        {"version": "4.0", "datasetReference": reference},
+    )
+    return pbip
+
+
+def _recording_logger():
+    lines = []
+    return lines, lambda msg, level: lines.append(msg)
+
+
+def _run_one(tmp_path, pbip, **overrides):
+    lines, logger = _recording_logger()
+    cfg = PipelineConfig(reports_folder=str(tmp_path), **overrides)
+    return Pipeline(cfg, logger=logger).run_single(pbip), lines
+
+
+def test_renamed_pbip_uses_definition_pbir(tmp_path):
+    shutil.copytree(SAMPLE_MODEL_DIR, str(tmp_path / "A.SemanticModel"))
+    pbip = _make_project(tmp_path, "Renamed", "A.Report", {"byPath": {"path": "../A.SemanticModel"}})
+    single, lines = _run_one(tmp_path, pbip)
+    assert single.success
+    assert single.table_count > 0
+    assert single.report_name == "Renamed"
+    assert single.output_path == os.path.join(str(tmp_path), "Renamed.html")
+    assert "  model: A.SemanticModel (definition.pbir)" in lines
+
+
+def test_by_path_to_differently_named_folder(tmp_path):
+    shutil.copytree(SAMPLE_MODEL_DIR, str(tmp_path / "Shared.SemanticModel"))
+    pbip = _make_project(tmp_path, "Sales", "Other.Report", {"byPath": {"path": "../Shared.SemanticModel"}})
+    single, _ = _run_one(tmp_path, pbip)
+    assert single.success
+    assert single.table_count > 0
+
+
+def test_empty_pbip_falls_back_to_name_guess_silently(tmp_path):
+    pbip = _make_report(tmp_path, "r1", "Sales")
+    single, lines = _run_one(tmp_path, pbip)
+    assert single.success
+    assert not any(line.startswith("  model:") for line in lines)
+
+
+def test_model_bim_is_skipped_and_existing_output_is_untouched(tmp_path):
+    model = tmp_path / "Sales.SemanticModel"
+    model.mkdir()
+    (model / "model.bim").write_text("{}", encoding="utf-8")
+    pbip = tmp_path / "Sales.pbip"
+    pbip.write_text("", encoding="utf-8")
+    out = tmp_path / "Sales.html"
+    out.write_bytes(b"good output")
+    for overrides in ({"overwrite": True}, {"skip_unchanged": True}, {}):
+        single, lines = _run_one(tmp_path, str(pbip), **overrides)
+        assert single.skipped
+        assert "model.bim" in single.skip_reason
+        assert not single.content_hash
+        assert out.read_bytes() == b"good output"
+        assert lines == [f"Sales - skipped: {single.skip_reason}"]
+
+
+def test_model_without_definition_or_bim_is_skipped(tmp_path):
+    (tmp_path / "Sales.SemanticModel").mkdir()
+    pbip = tmp_path / "Sales.pbip"
+    pbip.write_text("", encoding="utf-8")
+    single, _ = _run_one(tmp_path, str(pbip))
+    assert single.skipped
+    assert single.skip_reason == "no definition folder"
+
+
+def test_missing_model_folder_is_skipped(tmp_path):
+    pbip = tmp_path / "Sales.pbip"
+    pbip.write_text("", encoding="utf-8")
+    single, _ = _run_one(tmp_path, str(pbip))
+    assert single.skipped
+    assert single.skip_reason == "no semantic model folder"
+
+
+def test_by_connection_is_skipped_without_name_guess(tmp_path):
+    shutil.copytree(SAMPLE_MODEL_DIR, str(tmp_path / "Sales.SemanticModel"))
+    pbip = _make_project(
+        tmp_path, "Sales", "Sales.Report",
+        {"byConnection": {"connectionString": "semanticmodelid=00000000-0000-0000-0000-000000000000"}},
+    )
+    single, _ = _run_one(tmp_path, pbip)
+    assert single.skipped
+    assert single.skip_reason == "report uses a live connection (byConnection), no local semantic model"
+
+
+def test_broken_by_path_is_skipped_without_name_guess(tmp_path):
+    shutil.copytree(SAMPLE_MODEL_DIR, str(tmp_path / "Sales.SemanticModel"))
+    pbip = _make_project(tmp_path, "Sales", "Sales.Report", {"byPath": {"path": "../Gone.SemanticModel"}})
+    single, _ = _run_one(tmp_path, pbip)
+    assert single.skipped
+    assert single.skip_reason == "definition.pbir points to a missing folder: ../Gone.SemanticModel"
+
+
+def test_skipped_model_adds_no_hash_and_counts_as_skipped(tmp_path):
+    folder = tmp_path / "r1"
+    model = folder / "Sales.SemanticModel"
+    model.mkdir(parents=True)
+    (model / "model.bim").write_text("{}", encoding="utf-8")
+    (folder / "Sales.pbip").write_text("", encoding="utf-8")
+    cfg = PipelineConfig(reports_folder=str(tmp_path), skip_unchanged=True)
+    result = Pipeline(cfg, logger=_noop_logger).run()
+    assert result.hashes == {}
+    assert result.skipped_count == 1
+    assert result.success_count == 0
+    assert result.error_count == 0
