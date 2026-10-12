@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from tmdl_lens.readme_generator import generate_html, generate_readme
+from tmdl_lens.readme_generator import _SECTIONS, generate_html, generate_readme
 from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.tmdl_parser import (
     Column,
@@ -35,18 +35,7 @@ GOLDEN_FILES = {
     ("edge", "html"): os.path.join(GOLDEN_DIR, "edge.html"),
 }
 
-SECTION_TITLES = [
-    "Overview",
-    "1. Data Sources",
-    "2. Table Details",
-    "3. Measures",
-    "4. Functions",
-    "5. Relationships",
-    "6. Security Roles",
-    "7. M Parameters",
-    "Unresolved Sources",
-    "8. Model Statistics",
-]
+SECTION_TITLES = [title for _, title in _SECTIONS]
 CASES_WITH_UNRESOLVED = {"full", "nodax"}
 
 
