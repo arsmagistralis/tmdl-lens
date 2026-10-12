@@ -30,7 +30,6 @@ def _write_config(path, data):
 
 
 @pytest.mark.parametrize("content", [
-    b'\xef\xbb\xbf{"owner": "o"}',
     b'{"owner": "o"',
     b"[]",
     b'\xff\xfe{"owner": "o"}',
@@ -97,3 +96,29 @@ def test_write_back_leaves_no_temp_files(tmp_path):
     assert rc == 0
     json.loads(cfg.read_text(encoding="utf-8"))
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_bom_config_is_read(tmp_path):
+    reports = tmp_path / "reports"
+    _make_report(reports, "", "Sales")
+    cfg = tmp_path / "config.json"
+    cfg.write_bytes(b'\xef\xbb\xbf{"output_format": "md"}')
+    rc = main(["--config", str(cfg), "--reports-folder", str(reports)])
+    assert rc == 0
+    assert (reports / "README.md").exists()
+
+
+def test_wrong_typed_value_is_warned_replaced_and_kept_in_file(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    _make_report(reports, "", "Sales")
+    cfg = tmp_path / "config.json"
+    _write_config(cfg, {"output_format": "md", "include_dax": "yes", "skip_unchanged": "no"})
+    rc = main(["--config", str(cfg), "--reports-folder", str(reports)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "config key 'include_dax' has invalid value \"yes\", using true" in out
+    assert "config key 'skip_unchanged' has invalid value \"no\", using false" in out
+    assert (reports / "README.md").exists()
+    saved = json.loads(cfg.read_text(encoding="utf-8"))
+    assert saved["include_dax"] == "yes"
+    assert "Sales.pbip" in saved["file_hashes"]

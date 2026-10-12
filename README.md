@@ -75,11 +75,11 @@ python main.py
 
 If no output folder is set, each `README.md` is written next to its `.pbip` file. If a separate output folder is set, each report gets its own named subfolder inside it - for example `docs/SalesReport/README.md`, `docs/FinanceReport/README.md` - so multiple reports never collide.
 
-Optional documentation metadata (owner, team, refresh schedule) is set in the **Configure** tab and stored in `config.json` next to the app. Values left blank are omitted from the generated output.
+Optional documentation metadata (owner, team, refresh schedule) is set in the **Configure** tab and stored in `config.json`: next to the executable for the standalone app, in the repository root when run from source, and in `%APPDATA%\tmdl-lens` on Windows or `~/.config/tmdl-lens` elsewhere for a pip install. A pip install that finds no file there copies an older `config.json` from its package folder once and leaves the old file in place. Values left blank are omitted from the generated output.
 
 By default the app skips reports whose TMDL files and documentation settings have not changed since the last run - each report is hashed, and only reports that actually moved are regenerated. Turn this off with **Skip reports with no TMDL changes** in **Configure**.
 
-On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html` or `md`.
+On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html` or `md`. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
 
 ### Command line
 
@@ -90,7 +90,7 @@ tmdl-lens --reports-folder C:\path\to\reports
 tmdl-lens -r C:\path\to\reports -o docs --format html --overwrite
 ```
 
-Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing or the file passed to `--config` exists but cannot be parsed. Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs. A `--config` path that does not exist is warned about and not created; relative paths inside the config resolve against the config file's folder. With `--skip-unchanged`, a report whose content changed is regenerated even when `--overwrite` is off.
+Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing or the file passed to `--config` exists but cannot be parsed (a UTF-8 byte order mark is accepted). Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs. A `--config` path that does not exist is warned about and not created; relative paths inside the config resolve against the config file's folder. A value of the wrong type is warned about and replaced by its default for that run, and the file keeps your value. With `--skip-unchanged`, a report whose content changed is regenerated even when `--overwrite` is off.
 
 ---
 

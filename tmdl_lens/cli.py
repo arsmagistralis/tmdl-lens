@@ -6,11 +6,10 @@ no GUI dependencies. Installed as the `tmdl-lens` console command.
 """
 
 import argparse
-import json
 import os
 import sys
 
-from tmdl_lens.config import validate_config
+from tmdl_lens.config import check_types, read_file, validate_config, write_atomic
 from tmdl_lens.pipeline import Pipeline, PipelineConfig
 from tmdl_lens.version import __version__
 
@@ -81,42 +80,34 @@ def _make_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_settings(path: str) -> tuple[dict, str]:
-    """
-    Load a config file. Returns (settings, error) where error is "" on
-    success, "missing" when the file does not exist, or a reason string
-    when the file exists but cannot be used.
-    """
-    if not os.path.exists(path):
-        return {}, "missing"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-    except UnicodeDecodeError as e:
-        return {}, f"file is not valid UTF-8: {e}"
-    except json.JSONDecodeError as e:
-        return {}, f"file is not valid JSON: {e}"
-    except OSError as e:
-        return {}, f"file cannot be read: {e}"
-    if not isinstance(saved, dict):
-        return {}, f"expected a JSON object, got {type(saved).__name__}"
-    return saved, ""
+_FALLBACKS = {
+    "reports_folder": "",
+    "output_folder": "",
+    "include_dax": True,
+    "output_format": "html",
+    "overwrite_readme": False,
+    "skip_unchanged": False,
+    "owner": "",
+    "team": "",
+    "refresh_schedule": "",
+    "file_hashes": {},
+}
 
 
 def _build_config(args, saved: dict) -> PipelineConfig:
-    def pick(cli_value, key, fallback):
-        return cli_value if cli_value is not None else saved.get(key, fallback)
+    def pick(cli_value, key):
+        return cli_value if cli_value is not None else saved.get(key, _FALLBACKS[key])
 
     return PipelineConfig(
-        reports_folder=pick(args.reports_folder, "reports_folder", ""),
-        output_folder=pick(args.output_folder, "output_folder", ""),
-        include_dax=pick(args.include_dax, "include_dax", True),
-        output_format=pick(args.format, "output_format", "html"),
-        overwrite=pick(args.overwrite, "overwrite_readme", False),
-        skip_unchanged=pick(args.skip_unchanged, "skip_unchanged", False),
-        owner=pick(args.owner, "owner", ""),
-        team=pick(args.team, "team", ""),
-        refresh_schedule=pick(args.refresh_schedule, "refresh_schedule", ""),
+        reports_folder=pick(args.reports_folder, "reports_folder"),
+        output_folder=pick(args.output_folder, "output_folder"),
+        include_dax=pick(args.include_dax, "include_dax"),
+        output_format=pick(args.format, "output_format"),
+        overwrite=pick(args.overwrite, "overwrite_readme"),
+        skip_unchanged=pick(args.skip_unchanged, "skip_unchanged"),
+        owner=pick(args.owner, "owner"),
+        team=pick(args.team, "team"),
+        refresh_schedule=pick(args.refresh_schedule, "refresh_schedule"),
     )
 
 
@@ -133,7 +124,7 @@ def main(argv=None) -> int:
     config_loaded = False
     saved = {}
     if cfg_path:
-        saved, load_error = _load_settings(cfg_path)
+        saved, load_error = read_file(cfg_path)
         if load_error == "missing":
             log(
                 f"warning: config file not found: {cfg_path} - using defaults "
@@ -146,10 +137,11 @@ def main(argv=None) -> int:
         else:
             config_loaded = True
 
-    build_source = saved
+    build_source, type_warnings = check_types(saved, _FALLBACKS)
+    for warning in type_warnings:
+        log(f"warning: {warning}", "warn")
     if config_loaded:
         cfg_dir = os.path.dirname(os.path.abspath(cfg_path))
-        build_source = dict(saved)
         for key in ("reports_folder", "output_folder"):
             value = build_source.get(key)
             if isinstance(value, str) and value and not os.path.isabs(value):
@@ -175,9 +167,7 @@ def main(argv=None) -> int:
         log(f"error: reports folder does not exist: {config.reports_folder}", "err")
         return 1
 
-    hashes = saved.get("file_hashes", {})
-    if not isinstance(hashes, dict):
-        hashes = {}
+    hashes = build_source.get("file_hashes", {})
 
     pipeline = Pipeline(config, saved_hashes=hashes, logger=log)
     result = pipeline.run()
@@ -187,17 +177,8 @@ def main(argv=None) -> int:
         if not isinstance(old_hashes, dict):
             old_hashes = {}
         saved["file_hashes"] = {**old_hashes, **result.hashes}
-        tmp_path = cfg_path + ".tmp"
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(saved, f, indent=2)
-            os.replace(tmp_path, cfg_path)
-        except OSError:
+        if not write_atomic(cfg_path, saved):
             log(f"warning: could not save content hashes to {cfg_path}", "warn")
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
 
     return 0 if result.error_count == 0 else 1
 

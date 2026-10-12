@@ -17,7 +17,7 @@ import customtkinter as ctk
 # Ensure tmdl_lens/ is importable when running directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmdl_lens.config import load as load_config, save as save_config, validate_config
+from tmdl_lens.config import load_result, save as save_config, validate_config
 from tmdl_lens.pipeline import Pipeline, PipelineConfig, PipelineResult
 from tmdl_lens.version import __version__ as APP_VERSION
 
@@ -68,7 +68,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.config_data = load_config()
+        self._config_load = load_result()
+        self.config_data = self._config_load.config
         self._last_run: str = "never"
         self._run_thread: threading.Thread | None = None
         self._watcher: TmdlWatcher | None = None
@@ -443,6 +444,14 @@ class App(ctk.CTk):
             self.log('install with: pip install watchdog', "warn")
         elif not self.config_data.get("features", {}).get("watcher", True):
             self.log('file watcher disabled in config.json (features.watcher)', "warn")
+        self.log(f"config: {self._config_load.path}", "info")
+        if self._config_load.migrated_from:
+            self.log(f"config copied from {self._config_load.migrated_from}", "info")
+        if self._config_load.failed:
+            self.log(f"could not load config: {self._config_load.error}", "err")
+            self.log("config.json will not be overwritten until you press Save", "err")
+        for warning in self._config_load.warnings:
+            self.log(warning, "warn")
         for warning in validate_config(self.config_data):
             self.log(warning, "warn")
 
@@ -766,13 +775,17 @@ class App(ctk.CTk):
 
     # ── Action handlers ───────────────────────────────────────────────────────
 
+    def _write_config(self, config: dict) -> bool:
+        ok = save_config(config)
+        if not ok:
+            self.log(f"warning: settings could not be saved to {self._config_load.path}", "warn")
+        return ok
+
     def _on_save_config(self):
         self.config_data = self._collect_config()
-        ok = save_config(self.config_data)
-        if ok:
+        if self._write_config(self.config_data):
+            self._config_load.error = ""
             self.log("config saved", "ok")
-        else:
-            self.log("failed to save config", "err")
 
     def _on_clear_log(self):
         self._log_text.configure(state="normal")
@@ -940,7 +953,9 @@ class App(ctk.CTk):
         if not new_hashes:
             return
         self.config_data.setdefault("file_hashes", {}).update(new_hashes)
-        save_config(self._collect_config())
+        if self._config_load.failed:
+            return
+        self._write_config(self._collect_config())
 
     # -- Log -------------------------------------------------------------------
 
@@ -960,9 +975,11 @@ class App(ctk.CTk):
     def _auto_save_config(self):
         """Write config.json on first launch only - don't overwrite an existing file."""
         from tmdl_lens.config import config_path
+        if self._config_load.failed:
+            return
         if not os.path.exists(config_path()):
             self.config_data = self._collect_config()
-            save_config(self.config_data)
+            self._write_config(self.config_data)
 
     def _center_window(self):
         self.update_idletasks()
@@ -977,7 +994,8 @@ class App(ctk.CTk):
     def _on_close(self):
         """Auto-save config on close so settings persist without requiring manual Save."""
         self.config_data = self._collect_config()
-        save_config(self.config_data)
+        if not self._config_load.failed:
+            self._write_config(self.config_data)
         self._stop_watcher()
         self.destroy()
 
