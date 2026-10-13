@@ -174,7 +174,7 @@ def test_both_renderers_emit_the_section_titles_in_order(case):
     ]
     html_titles = [
         re.sub(r"^&#9888; ", "", t)
-        for t in re.findall(r"<h2>(.*?)</h2>", _render(case, "html"))
+        for t in re.findall(r"<h2[^>]*>(.*?)</h2>", _render(case, "html"))
     ]
     text_lines = _render(case, "txt").split("\n")
     text_titles = [
@@ -185,6 +185,29 @@ def test_both_renderers_emit_the_section_titles_in_order(case):
     assert md_titles == expected
     assert html_titles == expected
     assert text_titles == expected
+
+
+@pytest.mark.parametrize("case", ["full", "nodax", "empty", "edge"])
+def test_markdown_contents_match_rendered_headings_and_anchors(case):
+    md = _render(case, "md")
+    contents = md.split("**Contents**", 1)[1].split("\n---\n", 1)[0]
+    entries = re.findall(r"^- \[(.+?)\]\(#([a-z-]+)\)$", contents, re.MULTILINE)
+    anchored = re.findall(r'^<a id="([a-z-]+)"></a>\n## (.+)$', md, re.MULTILINE)
+    headings = re.findall(r"^## (.+)$", md, re.MULTILINE)
+    assert entries
+    assert [label for label, _ in entries] == headings
+    assert [(target, label) for label, target in entries] == anchored
+
+
+@pytest.mark.parametrize("case", ["full", "nodax", "empty", "edge"])
+def test_html_contents_match_rendered_headings_and_ids(case):
+    html = _render(case, "html")
+    nav = re.search(r'<nav class="toc">(.*?)</nav>', html).group(1)
+    entries = re.findall(r'<li><a href="#([a-z-]+)">(.*?)</a></li>', nav)
+    headings = re.findall(r'<h2 id="([a-z-]+)">(.*?)</h2>', html)
+    assert entries
+    assert entries == headings
+    assert len(re.findall(r"<h2[^>]*>", html)) == len(headings)
 
 
 @pytest.mark.parametrize("case", ["full", "nodax", "empty", "edge"])

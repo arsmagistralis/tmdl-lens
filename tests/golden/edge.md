@@ -1,5 +1,20 @@
 # edge
 
+**Contents**
+
+- [Overview](#overview)
+- [1. Data Sources](#data-sources)
+- [2. Table Details](#table-details)
+- [3. Measures](#measures)
+- [4. Functions](#functions)
+- [5. Relationships](#relationships)
+- [6. Security Roles](#security-roles)
+- [7. M Parameters](#m-parameters)
+- [8. Model Statistics](#statistics)
+
+---
+
+<a id="overview"></a>
 ## Overview
 
 | Property | Value |
@@ -10,6 +25,7 @@
 
 ---
 
+<a id="data-sources"></a>
 ## 1. Data Sources
 
 This model contains 2 loaded tables, 3 measures, 1 relationship.
@@ -25,6 +41,7 @@ This model contains 2 loaded tables, 3 measures, 1 relationship.
 
 ---
 
+<a id="table-details"></a>
 ## 2. Table Details
 
 ### `Sales`
@@ -93,6 +110,7 @@ COUNTROWS(Sales)
 | `yyyy-mm-dd` | 1 | `Date` (Sales) |
 | `#,0.00` | 1 | `Amount` (Sales) |
 
+<a id="measures"></a>
 ## 3. Measures
 
 ### Finance\\Margins
@@ -138,12 +156,14 @@ COUNTROWS(Sales)
 
 ---
 
+<a id="functions"></a>
 ## 4. Functions
 
 *No user-defined functions defined.*
 
 ---
 
+<a id="relationships"></a>
 ## 5. Relationships
 
 | From Table | From Column | To Table | To Column | Cardinality | Cross Filter | Security Filter |
@@ -152,12 +172,14 @@ COUNTROWS(Sales)
 
 ---
 
+<a id="security-roles"></a>
 ## 6. Security Roles
 
 *No security roles defined.*
 
 ---
 
+<a id="m-parameters"></a>
 ## 7. M Parameters
 
 | Parameter | Type | Value | Used By |
@@ -170,6 +192,7 @@ COUNTROWS(Sales)
 
 ---
 
+<a id="statistics"></a>
 ## 8. Model Statistics
 
 | Category | Count | Items |

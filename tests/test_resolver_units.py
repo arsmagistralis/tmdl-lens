@@ -286,15 +286,15 @@ def test_label_excel_local_and_sharepoint():
 
 
 def test_resolve_generated_calendar_table():
-    helper = SourceExpression(name="calendar-start", source_type="scalar_helper")
+    helper = SourceExpression(name="first-day-helper", source_type="scalar_helper")
     calendar = Table(
         name="Calendar",
         table_type="dim",
         partition_type="m",
         inline_source=_classify_m_content(
             'let\n'
-            '    #"start-date" = #"calendar-start",\n'
-            '    Dates = List.Generate(() => #"start-date", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
+            '    #"seed-day" = #"first-day-helper",\n'
+            '    Dates = List.Generate(() => #"seed-day", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
             '    Calendar = Table.FromList(Dates, Splitter.SplitByNothing())\n'
             'in\n'
             '    Calendar',

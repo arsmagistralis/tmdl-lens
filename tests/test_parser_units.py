@@ -904,15 +904,15 @@ def test_classify_excel_web_url():
 def test_classify_calendar_alias_keeps_reference_and_flags_builds_table():
     m = (
         'let\n'
-        '    #"start-date" = #"calendar-start",\n'
-        '    Dates = List.Generate(() => #"start-date", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
+        '    #"seed-day" = #"first-day-helper",\n'
+        '    Dates = List.Generate(() => #"seed-day", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
         '    Calendar = Table.FromList(Dates, Splitter.SplitByNothing())\n'
         'in\n'
         '    Calendar'
     )
     expr = _classify_m_content(m, "Calendar")
     assert expr.source_type == "derived"
-    assert expr.derived_from == "calendar-start"
+    assert expr.derived_from == "first-day-helper"
     assert expr.builds_table is True
 
 

@@ -14,6 +14,7 @@ See a [real example output](sample/README.md) generated from the included sample
 
 Each generated README includes:
 
+- **Contents** - a linked table of contents of the sections below (Markdown and HTML)
 - **Data Sources** - connector type and resolved source detail for every query. 30+ Power Query connector functions have dedicated labels (SQL, Dataflows, SharePoint, Excel, OData, Azure Blob/Table/Data Lake storage, Databricks, Snowflake, Salesforce, Oracle, PostgreSQL, SAP HANA, and more); any connector without a dedicated label is still auto-detected from the query and shown with its namespace and function for manual labelling.
 - **Table Details** - table type, source detail, and column list
 - **Measures** - full DAX (optional), display folder, and format string

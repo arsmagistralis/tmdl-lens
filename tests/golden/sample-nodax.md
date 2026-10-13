@@ -1,5 +1,21 @@
 # tmdl-lens-test-report
 
+**Contents**
+
+- [Overview](#overview)
+- [1. Data Sources](#data-sources)
+- [2. Table Details](#table-details)
+- [3. Measures](#measures)
+- [4. Functions](#functions)
+- [5. Relationships](#relationships)
+- [6. Security Roles](#security-roles)
+- [7. M Parameters](#m-parameters)
+- [⚠ Unresolved Sources](#unresolved)
+- [8. Model Statistics](#statistics)
+
+---
+
+<a id="overview"></a>
 ## Overview
 
 | Property | Value |
@@ -10,6 +26,7 @@
 
 ---
 
+<a id="data-sources"></a>
 ## 1. Data Sources
 
 This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 measures-only table, 1 calculation group, 1 not loaded, 7 measures, 3 relationships.
@@ -48,6 +65,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="table-details"></a>
 ## 2. Table Details
 
 ### `dim-product`
@@ -187,6 +205,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 | `0` | 5 | `order_id` (fact-sales), `order_id` (helper-order-lookup), `Year` (dim-date), `MonthNumber` (dim-date), `param-metric-selector Order` (param-metric-selector) |
 | `Long Date` | 3 | `order_date` (fact-sales), `ship_date` (fact-sales), `Date` (dim-date) |
 
+<a id="measures"></a>
 ## 3. Measures
 
 ### General
@@ -212,6 +231,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="functions"></a>
 ## 4. Functions
 
 | Function | Used By | Description |
@@ -221,6 +241,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="relationships"></a>
 ## 5. Relationships
 
 | From Table | From Column | To Table | To Column | Cardinality | Cross Filter | Security Filter |
@@ -236,6 +257,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="security-roles"></a>
 ## 6. Security Roles
 
 | Role | Table | Filter | Dynamic |
@@ -249,6 +271,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="m-parameters"></a>
 ## 7. M Parameters
 
 | Parameter | Type | Value | Used By |
@@ -261,6 +284,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 
 ---
 
+<a id="unresolved"></a>
 ## ⚠ Unresolved Sources
 
 The following sources could not be resolved statically.
@@ -272,6 +296,7 @@ Use tmdl-lens to provide a manual label for each.
 
 ---
 
+<a id="statistics"></a>
 ## 8. Model Statistics
 
 | Category | Count | Items |
