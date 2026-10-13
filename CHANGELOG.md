@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/nox-magistralis/tmdl-lens/compare/v0.6.1...v0.7.0) (2026-10-13)
+
+
+### Features
+
+* audit remediation, output formats and the report layer ([bafc600](https://github.com/nox-magistralis/tmdl-lens/commit/bafc600d52c9268b68a2de12c868065bf4e767e5))
+* **formats:** add a JSON output format with a published schema ([305adbb](https://github.com/nox-magistralis/tmdl-lens/commit/305adbbced7e83c212b9a6dc202fb3469a5eac8d))
+* **formats:** add a plain-text output format ([0b8ad4e](https://github.com/nox-magistralis/tmdl-lens/commit/0b8ad4e6d0dbdbd2e12ada548a3664586043adcf))
+* **generator:** add a table of contents built from the section list ([8203462](https://github.com/nox-magistralis/tmdl-lens/commit/82034628aa11f3e8e82da7fa3005691ad3e9204f))
+* **generator:** draw an opt-in Mermaid lineage diagram ([c2d5e56](https://github.com/nox-magistralis/tmdl-lens/commit/c2d5e568c374b328cececcf4fc89689d78e32711))
+* **report:** parse the report layer into pages, visuals and usages ([262557b](https://github.com/nox-magistralis/tmdl-lens/commit/262557b2396c84a2298d1a8529585ba66e2b6685))
+
+
+### Bug Fixes
+
+* **cli:** fail loudly on unreadable config and make skip hash-first ([3dc809b](https://github.com/nox-magistralis/tmdl-lens/commit/3dc809b0173bc632b9fb6b906ffdf5e4c51e2160))
+* **config:** keep a broken config intact and validate every value ([5e3cca4](https://github.com/nox-magistralis/tmdl-lens/commit/5e3cca45d22a2a2d2e0fd3bd3070d9397650e125))
+* **parser:** resolve M sources through a documented precedence order ([0d4abcf](https://github.com/nox-magistralis/tmdl-lens/commit/0d4abcf4cfaee77045dff40629d7b481d8087ddc))
+* **pipeline:** find the model folder from the project pointers ([27aba3d](https://github.com/nox-magistralis/tmdl-lens/commit/27aba3dc12728ef3d4430f2e67d3c4b5dac724bc))
+
 ## [0.6.1](https://github.com/nox-magistralis/tmdl-lens/compare/v0.6.0...v0.6.1) (2026-10-09)
 
 
