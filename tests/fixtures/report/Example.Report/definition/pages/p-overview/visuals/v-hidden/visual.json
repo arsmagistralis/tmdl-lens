@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/1.0.0/schema.json",
+  "name": "v-hidden",
+  "position": {
+    "x": 0,
+    "y": 640,
+    "z": 6,
+    "width": 200,
+    "height": 60
+  },
+  "isHidden": true,
+  "visual": {
+    "visualType": "card",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Sales"
+                    }
+                  },
+                  "Property": "Order Count"
+                }
+              },
+              "queryRef": "Sales.Order Count"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
