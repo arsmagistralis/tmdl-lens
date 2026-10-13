@@ -283,6 +283,15 @@ class App(ctk.CTk):
         )
         ctk.CTkFrame(frame, height=6, fg_color="transparent").pack(fill="x")
 
+        self._lineage_var = tk.BooleanVar(value=False)
+        self._toggle_row(
+            frame,
+            "Include lineage diagram",
+            "Add a Mermaid source-to-table diagram (Markdown output only)",
+            self._lineage_var,
+        )
+        ctk.CTkFrame(frame, height=6, fg_color="transparent").pack(fill="x")
+
         self._skip_var = tk.BooleanVar(value=False)
         self._toggle_row(
             frame,
@@ -718,6 +727,7 @@ class App(ctk.CTk):
         output_format = c.get("output_format", "html")
         self._format_var.set(output_format.upper() if output_format in ("html", "md", "txt", "json") else "HTML")
         self._dax_var.set(c.get("include_dax", True))
+        self._lineage_var.set(c.get("include_lineage", False))
         self._skip_var.set(c.get("skip_unchanged", True))
         self._watch_var.set(False)  # always off on startup - user enables manually
         self._debounce_var.set(f"{c.get('watch_debounce', 10)} sec")
@@ -738,6 +748,7 @@ class App(ctk.CTk):
             "overwrite_readme": self._overwrite_var.get(),
             "output_format":    self._format_var.get().lower(),
             "include_dax":      self._dax_var.get(),
+            "include_lineage":  self._lineage_var.get(),
             "skip_unchanged":   self._skip_var.get(),
             "watch_debounce":   debounce,
             "owner":            self._owner_var.get().strip(),
@@ -884,6 +895,7 @@ class App(ctk.CTk):
             reports_folder=config["reports_folder"],
             output_folder=config.get("output_folder", ""),
             include_dax=config.get("include_dax", True),
+            include_lineage=config.get("include_lineage", False),
             output_format=config.get("output_format", "html"),
             overwrite=True,
             skip_unchanged=config.get("skip_unchanged", False),
@@ -913,6 +925,7 @@ class App(ctk.CTk):
             reports_folder=config["reports_folder"],
             output_folder=config.get("output_folder", ""),
             include_dax=config.get("include_dax", True),
+            include_lineage=config.get("include_lineage", False),
             output_format=config.get("output_format", "html"),
             overwrite=config.get("overwrite_readme", False),
             skip_unchanged=config.get("skip_unchanged", False),

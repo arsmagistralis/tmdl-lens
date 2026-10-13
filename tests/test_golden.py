@@ -42,6 +42,8 @@ GOLDEN_FILES = {
     ("nodax", "json"): os.path.join(GOLDEN_DIR, "sample-nodax.json"),
     ("empty", "json"): os.path.join(GOLDEN_DIR, "empty.json"),
     ("edge", "json"): os.path.join(GOLDEN_DIR, "edge.json"),
+    ("full-lineage", "md"): os.path.join(GOLDEN_DIR, "sample-lineage.md"),
+    ("lineage", "md"): os.path.join(GOLDEN_DIR, "lineage.md"),
 }
 
 RENDERERS = {"md": generate_readme, "html": generate_html, "txt": generate_text, "json": generate_json}
@@ -132,10 +134,52 @@ def _edge():
     return model, resolved
 
 
+def _lineage():
+    expressions = [
+        SourceExpression(name="crm-source", source_type="connector", connector_namespace="Sql",
+                         connector_function="Database", server="srv", database="crm"),
+        SourceExpression(name="orders-query", source_type="derived", derived_from="crm-source"),
+        SourceExpression(name="orders-clean", source_type="derived", derived_from="orders-query"),
+        SourceExpression(name="east-orders", source_type="derived", derived_from="crm-source"),
+        SourceExpression(name="west-orders", source_type="connector", connector_namespace="Web",
+                         connector_function="Contents", url="https://example.com/west"),
+        SourceExpression(name="all-orders", source_type="table_combine",
+                         combine_sources=["east-orders", "west-orders"]),
+        SourceExpression(name="web-feed", source_type="connector", connector_namespace="Web",
+                         connector_function="Contents", url="https://example.com/feed"),
+        SourceExpression(name="cutoff-day", source_type="scalar_helper"),
+        SourceExpression(name="fnPad", source_type="function_def"),
+    ]
+    tables = [
+        Table(name="Orders", table_type="fact", partition_type="m", source_ref="orders-clean"),
+        Table(name="Customers", table_type="dim", partition_type="m", source_ref="crm-source"),
+        Table(name="AllOrders", table_type="fact", partition_type="m", source_ref="all-orders"),
+        Table(name="Calendar", table_type="dim", partition_type="m",
+              inline_source=SourceExpression(name="Calendar", source_type="generated")),
+        Table(name="Broken", table_type="fact", partition_type="m",
+              inline_source=SourceExpression(name="Broken", source_type="derived", derived_from="missing-query")),
+        Table(name="Staging", table_type="staging", partition_type="m", is_loaded=False, source_ref="web-feed"),
+        Table(name="Secret", table_type="dim", partition_type="m", is_hidden=True, source_ref="web-feed"),
+        Table(name='Odd "Q" [x] <y>', table_type="other", partition_type="m", source_ref="web-feed"),
+        Table(name="_Measures", table_type="measures_only", partition_type="m",
+              inline_source=SourceExpression(name="_Measures", source_type="embedded"),
+              measures=[Measure(name="Order Count", dax_expression="COUNTROWS(Orders)")]),
+    ]
+    model = SemanticModel(report_name="lineage", tables=tables, source_expressions=expressions)
+    resolved = resolve_sources(expressions, [], tables=tables)
+    return model, resolved
+
+
 def _render(case, fmt):
     if case == "full":
         model, resolved = _sample()
         config = _gen_config(SAMPLE_NAME, include_dax=True, metadata=True)
+    elif case == "full-lineage":
+        model, resolved = _sample()
+        config = dict(_gen_config(SAMPLE_NAME, include_dax=True, metadata=True), include_lineage=True)
+    elif case == "lineage":
+        model, resolved = _lineage()
+        config = dict(_gen_config("lineage", include_dax=True, metadata=False), include_lineage=True)
     elif case == "nodax":
         model, resolved = _sample()
         config = _gen_config(SAMPLE_NAME, include_dax=False, metadata=False)
@@ -226,3 +270,89 @@ def test_text_output_is_plain(case):
 
 def test_text_is_deterministic():
     assert _render("full", "txt") == _render("full", "txt")
+
+
+def _mermaid_block(markdown):
+    return markdown.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
+
+
+def test_lineage_is_off_by_default():
+    model, resolved = _sample()
+    config = _gen_config(SAMPLE_NAME, include_dax=True, metadata=True)
+    default = generate_readme(model, resolved, config)
+    explicit_off = generate_readme(model, resolved, dict(config, include_lineage=False))
+    assert default == explicit_off
+    assert "### Lineage" not in default
+    assert "mermaid" not in default
+
+
+@pytest.mark.parametrize("fmt", ["html", "txt", "json"])
+def test_lineage_is_markdown_only(fmt):
+    model, resolved = _lineage()
+    config = _gen_config("lineage", include_dax=True, metadata=False)
+    assert RENDERERS[fmt](model, resolved, dict(config, include_lineage=True)) == RENDERERS[fmt](model, resolved, config)
+
+
+def test_lineage_sits_at_the_end_of_data_sources_without_new_section():
+    markdown = _render("lineage", "md")
+    data_sources = markdown.split("## 1. Data Sources", 1)[1].split("## 2. Table Details", 1)[0]
+    assert "### Lineage" in data_sources
+    assert data_sources.index("### Not Loaded") < data_sources.index("### Lineage")
+    expected = [f"⚠ {title}" if key == "unresolved" else title for key, title in _SECTIONS]
+    assert re.findall(r"^## (.+)$", markdown, re.MULTILINE) == expected
+
+
+def test_lineage_graph_content_and_escaping():
+    block = _mermaid_block(_render("lineage", "md"))
+    node_lines = [line.strip() for line in block.split("\n") if re.match(r"\s+n[0-9a-f]{10}[\[(]", line)]
+    ids = [line[:11] for line in node_lines]
+    assert len(ids) == len(set(ids))
+    for name in ("cutoff-day", "fnPad", "_Measures", "Order Count", "missing-query"):
+        assert name not in block
+    for label in ("Orders", "Customers", "AllOrders", "Calendar", "Broken", "Staging", "Secret (hidden)",
+                  "orders-clean", "orders-query", "east-orders", "west-orders", "all-orders", "web-feed",
+                  "SQL: srv / crm", "Web API: https://example.com/feed", "Generated (M)", "Unresolved"):
+        assert f'"{label}"' in block, label
+    assert '"Odd #quot;Q#quot; [x] #lt;y#gt;"' in block
+    assert "class " in block and "unresolved" in block
+
+
+def test_lineage_node_id_is_sha256_of_identity():
+    import hashlib
+    from tmdl_lens.readme_generator import _mermaid_id
+    assert _mermaid_id("table:Orders") == "n" + hashlib.sha256(b"table:Orders").hexdigest()[:10]
+
+
+def test_lineage_is_independent_of_input_order():
+    model, resolved = _lineage()
+    config = dict(_gen_config("lineage", include_dax=True, metadata=False), include_lineage=True)
+    reordered = SemanticModel(
+        report_name=model.report_name,
+        tables=list(reversed(model.tables)),
+        source_expressions=list(reversed(model.source_expressions)),
+    )
+    reversed_resolved = dict(reversed(list(resolved.items())))
+    assert _mermaid_block(generate_readme(reordered, reversed_resolved, config)) == \
+        _mermaid_block(generate_readme(model, resolved, config))
+
+
+def test_lineage_is_identical_across_hash_seeds():
+    import subprocess
+    import sys
+    script = (
+        "import sys\n"
+        "from tmdl_lens.tmdl_parser import parse_semantic_model\n"
+        "from tmdl_lens.source_resolver import resolve_sources\n"
+        "from tmdl_lens.readme_generator import generate_readme\n"
+        "m = parse_semantic_model(sys.argv[1], 'r')\n"
+        "r = resolve_sources(m.source_expressions, m.m_parameters, tables=m.tables)\n"
+        "sys.stdout.buffer.write(generate_readme(m, r, {'report_name': 'r', 'include_lineage': True}).encode('utf-8'))\n"
+    )
+    outputs = set()
+    for seed in ("0", "1", "4242"):
+        result = subprocess.run(
+            [sys.executable, "-c", script, SAMPLE_MODEL_DIR],
+            cwd=REPO_ROOT, env=dict(os.environ, PYTHONHASHSEED=seed), capture_output=True, check=True,
+        )
+        outputs.add(result.stdout)
+    assert len(outputs) == 1

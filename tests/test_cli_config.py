@@ -149,3 +149,12 @@ def test_json_format_writes_one_lf_file_per_report(tmp_path):
     assert document["schema_version"] == "1.0"
     assert document["report"]["name"] == "Sales"
     assert sorted(p.name for p in reports.iterdir() if p.is_file()) == ["Sales.json", "Sales.pbip"]
+
+
+def test_include_lineage_flag_adds_mermaid_to_markdown_only_when_set(tmp_path):
+    reports = tmp_path / "reports"
+    _make_report(reports, "", "Sales")
+    assert main(["--reports-folder", str(reports), "--format", "md", "--overwrite"]) == 0
+    assert "```mermaid" not in (reports / "README.md").read_text(encoding="utf-8")
+    assert main(["--reports-folder", str(reports), "--format", "md", "--overwrite", "--include-lineage"]) == 0
+    assert "```mermaid" in (reports / "README.md").read_text(encoding="utf-8")

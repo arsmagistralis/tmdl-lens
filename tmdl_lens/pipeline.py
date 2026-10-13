@@ -36,6 +36,7 @@ class PipelineConfig:
     reports_folder: str
     output_folder: str = ""
     include_dax: bool = True
+    include_lineage: bool = False
     output_format: str = "html"  # "html" | "md"
     overwrite: bool = False
     skip_unchanged: bool = False
@@ -187,6 +188,7 @@ def _build_gen_config(report_name: str, config: PipelineConfig) -> dict:
         "team":             config.team,
         "refresh_schedule": config.refresh_schedule,
         "include_dax":      config.include_dax,
+        "include_lineage":  config.include_lineage,
     }
 
 
@@ -209,6 +211,7 @@ def _content_hash(model_dir: str, config: PipelineConfig, out_path: str) -> str:
     config_blob = json.dumps(
         {
             "include_dax":      config.include_dax,
+            "include_lineage":  config.include_lineage,
             "output_format":    config.output_format,
             "owner":            config.owner,
             "team":             config.team,
@@ -251,6 +254,8 @@ class Pipeline:
         """Process all reports in the configured folder. Returns a PipelineResult."""
         reports_folder = self.config.reports_folder
         self.logger(f"scanning {reports_folder}", "info")
+        if self.config.include_lineage and self.config.output_format != "md":
+            self.logger("warning: the lineage diagram is only added to Markdown output", "warn")
 
         pbip_files = _find_pbip_files(reports_folder)
         if not pbip_files:

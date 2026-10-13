@@ -78,6 +78,13 @@ def test_invalid_output_format_warns():
     assert any("output_format" in w for w in warnings)
 
 
+def test_include_lineage_is_type_checked(cfg_file):
+    cfg_file.write_text(json.dumps({"include_lineage": "yes"}), encoding="utf-8")
+    result = config.load_result()
+    assert result.config["include_lineage"] is False
+    assert result.warnings == ['config key \'include_lineage\' has invalid value "yes", using false']
+
+
 @pytest.mark.parametrize("value", ["html", "md", "txt", "json"])
 def test_supported_output_formats_do_not_warn(value):
     warnings = validate_config({"output_format": value})

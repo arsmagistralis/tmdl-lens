@@ -5,6 +5,7 @@ Takes a parsed SemanticModel and resolved sources dict and produces
 a structured README.md for each Power BI report.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass, replace
 
@@ -501,12 +502,136 @@ def _overview_section(config: dict, model: SemanticModel) -> str:
     return "\n".join(lines)
 
 
+_LINEAGE_OMITTED_TYPES = ("function_def", "scalar_helper")
+
+_LINEAGE_SHAPES = {
+    "table":  '{id}["{label}"]',
+    "query":  '{id}("{label}")',
+    "source": '{id}[("{label}")]',
+    "end":    '{id}(["{label}"])',
+}
+
+
+def _mermaid_id(identity: str) -> str:
+    return "n" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:10]
+
+
+def _mermaid_label(text: str) -> str:
+    return (
+        _text_flat(text)
+        .replace("&", "#amp;")
+        .replace('"', "#quot;")
+        .replace("<", "#lt;")
+        .replace(">", "#gt;")
+    )
+
+
+def _lineage_source_identity(rs: ResolvedSource) -> tuple[str, str]:
+    label = _connector_type_label(rs)
+    detail = ""
+    if rs.server and rs.database:
+        detail = f"{rs.server} / {rs.database}"
+    else:
+        detail = next(
+            (v for v in (rs.server, rs.url, rs.entity, rs.sharepoint_url, rs.file_name, rs.dsn) if v),
+            "",
+        )
+    text = f"{label}: {detail}" if detail else label
+    return f"source:{label}|{detail}", text
+
+
+def _lineage_graph(collected: dict, resolved: dict[str, ResolvedSource], model: SemanticModel) -> tuple[dict, set]:
+    tables = collected["loaded"] + collected["staging"]
+    table_names = {t.name for t in tables}
+    combine_lookup = {e.name: list(e.combine_sources) for e in model.source_expressions}
+    for t in model.tables:
+        if t.inline_source is not None:
+            combine_lookup[t.name] = list(t.inline_source.combine_sources)
+    nodes: dict[str, tuple[str, str, bool]] = {}
+    edges: set[tuple[str, str]] = set()
+
+    def node(kind: str, identity: str, label: str, unresolved: bool = False) -> str:
+        node_id = _mermaid_id(identity)
+        nodes.setdefault(node_id, (kind, label, unresolved))
+        return node_id
+
+    def named(name: str) -> str:
+        if name in table_names:
+            table = next(t for t in tables if t.name == name)
+            label = f"{name} (hidden)" if table.is_hidden else name
+            return node("table", f"table:{name}", label)
+        return node("query", f"query:{name}", name)
+
+    visited: set[str] = set()
+
+    def walk(target: str, owner: str, rs: ResolvedSource, path: list[str]) -> None:
+        if rs.source_type in _LINEAGE_OMITTED_TYPES and not rs.unresolved:
+            return
+        downstream = target
+        for name in path + list(rs.chain):
+            upstream = named(name)
+            edges.add((upstream, downstream))
+            downstream = upstream
+        names = path + list(rs.chain)
+        terminal = names[-1] if names else owner
+        if rs.unresolved:
+            end = node("end", f"end:unresolved:{terminal}", "Unresolved", unresolved=True)
+            edges.add((end, downstream))
+        elif rs.source_type == "connector":
+            identity, text = _lineage_source_identity(rs)
+            edges.add((node("source", identity, text), downstream))
+        elif rs.source_type == "table_combine":
+            for source_name in combine_lookup.get(terminal, []):
+                upstream = named(source_name)
+                edges.add((upstream, downstream))
+                if source_name in resolved and source_name not in visited:
+                    visited.add(source_name)
+                    walk(upstream, source_name, resolved[source_name], [])
+        else:
+            end = node("end", f"end:{rs.source_type}:{terminal}", _source_type_label(rs.source_type))
+            edges.add((end, downstream))
+
+    for t in tables:
+        rs = get_table_source(t, resolved)
+        target = named(t.name)
+        if rs is not None:
+            walk(target, t.name, rs, [t.source_ref] if t.source_ref else [])
+    return nodes, edges
+
+
+def _lineage_section(collected: dict, resolved: dict[str, ResolvedSource], model: SemanticModel) -> str:
+    nodes, edges = _lineage_graph(collected, resolved, model)
+    lines = [
+        "### Lineage",
+        "",
+        "> Sources on the left, report tables on the right, shared queries in between. "
+        "Helper functions, scalar helpers and parameters are omitted.",
+        "",
+    ]
+    if not nodes:
+        lines += ["*No lineage to draw.*", ""]
+        return "\n".join(lines)
+    lines += ["```mermaid", "flowchart LR"]
+    for node_id in sorted(nodes):
+        kind, label, _ = nodes[node_id]
+        lines.append("    " + _LINEAGE_SHAPES[kind].format(id=node_id, label=_mermaid_label(label)))
+    for upstream, downstream in sorted(edges):
+        lines.append(f"    {upstream} --> {downstream}")
+    unresolved = sorted(node_id for node_id, (_, _, flag) in nodes.items() if flag)
+    if unresolved:
+        lines.append("    classDef unresolved stroke-dasharray: 4 4")
+        lines.append(f"    class {','.join(unresolved)} unresolved")
+    lines += ["```", ""]
+    return "\n".join(lines)
+
+
 def _data_sources_section(
     loaded_tables: list[Table],
     staging_tables: list[Table],
     support_tables: list[Table],
     resolved: dict[str, ResolvedSource],
     model: SemanticModel,
+    lineage: str = "",
 ) -> str:
     lines = [_md_heading("data_sources"), ""]
     lines += [_model_summary(loaded_tables, staging_tables, support_tables, model), ""]
@@ -548,6 +673,9 @@ def _data_sources_section(
             lines.append(staging_fmt)
     else:
         lines += ["### Not Loaded", "", "*None.*", ""]
+
+    if lineage:
+        lines.append(lineage)
 
     lines += ["---", ""]
     return "\n".join(lines)
@@ -1597,10 +1725,11 @@ def generate_readme(
     loaded_visible = collected["loaded_visible"]
 
     ref_tables, ref_measures, ref_columns = _build_hidden_reference_map(model)
+    lineage = _lineage_section(collected, resolved, model) if config.get("include_lineage", False) else ""
 
     renderers = {
         "overview":       lambda: _overview_section(config, model),
-        "data_sources":   lambda: _data_sources_section(loaded, staging, support, resolved, model),
+        "data_sources":   lambda: _data_sources_section(loaded, staging, support, resolved, model, lineage),
         "table_details":  lambda: _table_details_section(loaded, support, resolved, include_dax, ref_tables, ref_measures, ref_columns, show_hidden),
         "measures":       lambda: _measures_section(collected["measures"], include_dax),
         "functions":      lambda: _functions_section(model, include_dax),

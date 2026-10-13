@@ -87,6 +87,7 @@ def test_build_gen_config():
         "team":             "T",
         "refresh_schedule": "R",
         "include_dax":      False,
+        "include_lineage":  False,
     }
 
 
@@ -375,3 +376,26 @@ def test_skipped_model_adds_no_hash_and_counts_as_skipped(tmp_path):
     assert result.skipped_count == 1
     assert result.success_count == 0
     assert result.error_count == 0
+
+
+def test_content_hash_changes_with_include_lineage(tmp_path):
+    model = tmp_path / "Sales.SemanticModel"
+    model.mkdir()
+    (model / "a.tmdl").write_text("A", encoding="utf-8")
+    off = PipelineConfig(reports_folder="", include_lineage=False)
+    on = PipelineConfig(reports_folder="", include_lineage=True)
+    assert _content_hash(str(model), off, "out") != _content_hash(str(model), on, "out")
+
+
+def test_lineage_warning_only_for_non_markdown_formats(tmp_path):
+    _make_report(tmp_path, "r1", "Sales")
+    message = "warning: the lineage diagram is only added to Markdown output"
+    for output_format, expected in (("md", 0), ("html", 1), ("txt", 1), ("json", 1)):
+        lines, logger = _recording_logger()
+        cfg = PipelineConfig(reports_folder=str(tmp_path), output_format=output_format,
+                             include_lineage=True, overwrite=True)
+        Pipeline(cfg, logger=logger).run()
+        assert lines.count(message) == expected, output_format
+    lines, logger = _recording_logger()
+    Pipeline(PipelineConfig(reports_folder=str(tmp_path), output_format="html", overwrite=True), logger=logger).run()
+    assert message not in lines

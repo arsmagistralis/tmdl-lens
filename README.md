@@ -15,6 +15,7 @@ See a [real example output](sample/README.md) generated from the included sample
 Each generated README includes:
 
 - **Contents** - a linked table of contents of the sections below (Markdown and HTML)
+- **Lineage** (optional, Markdown) - a Mermaid source-to-table flowchart, see [Lineage diagram](#lineage-diagram)
 - **Data Sources** - connector type and resolved source detail for every query. 30+ Power Query connector functions have dedicated labels (SQL, Dataflows, SharePoint, Excel, OData, Azure Blob/Table/Data Lake storage, Databricks, Snowflake, Salesforce, Oracle, PostgreSQL, SAP HANA, and more); any connector without a dedicated label is still auto-detected from the query and shown with its namespace and function for manual labelling.
 - **Table Details** - table type, source detail, and column list
 - **Measures** - full DAX (optional), display folder, and format string
@@ -106,6 +107,10 @@ Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everyt
 
 The JSON output is versioned by `schema_version` (currently `1.0`) and is deterministic across machines: no timestamp or tool version, every list of named items sorted by name, LF line endings. Values are fixed codes rather than display text (`kind`, `source.type`, `cardinality`, `cross_filter`, `security_filter`, warning `code`), a source that could not be resolved is `{"resolved": false, "reason": ...}`, and `source` is `null` for a table without an M source. Every shared expression is listed under `expressions`, including those no table uses. With `--no-include-dax`, every `expression` is `null`; hidden-reference warnings are still reported.
 
+### Lineage diagram
+
+`--include-lineage` (config key `include_lineage`, GUI option **Include lineage diagram**) adds a `### Lineage` sub-section at the end of "1. Data Sources" in the Markdown output: a Mermaid flowchart from each external source, through the shared queries, to every loaded and not-loaded table. GitHub, Azure DevOps and the VS Code preview render it without any script, so the output stays offline. Helper functions, scalar helpers and parameters are left out. It is off by default, and with it off the output is unchanged. The diagram is Markdown-only: with `--format html`, `txt` or `json` the option has no effect and a warning is logged once per run (the JSON output already carries each source's `chain` and `combine_sources`). Node ids are derived from a SHA-256 of each node's identity, so the diagram is byte-identical across runs and machines, and adding a table does not rename the other nodes.
+
 ---
 
 ## Requirements
@@ -131,7 +136,7 @@ change and requires a new major version, announced in the GitHub release notes.
 
 `--version`, `-r` / `--reports-folder`, `-o` / `--output-folder`,
 `--format` (`html`, `md`, `txt` or `json`), `--include-dax` / `--no-include-dax`,
-`--overwrite` / `--no-overwrite`, `--skip-unchanged` / `--no-skip-unchanged`,
+`--include-lineage` / `--no-include-lineage`, `--overwrite` / `--no-overwrite`, `--skip-unchanged` / `--no-skip-unchanged`,
 `--owner`, `--team`, `--refresh-schedule`, `--config`, `-q` / `--quiet`.
 
 **Exit codes:** `0` success; `1` a report failed or the reports folder does
@@ -139,7 +144,7 @@ not exist; `2` `--reports-folder` is missing or the `--config` file exists
 but cannot be parsed.
 
 **`config.json` keys:** `reports_folder`, `output_folder`, `output_format`,
-`overwrite_readme`, `include_dax`, `skip_unchanged`, `watch_debounce`,
+`overwrite_readme`, `include_dax`, `include_lineage`, `skip_unchanged`, `watch_debounce`,
 `owner`, `team`, `refresh_schedule`, `file_hashes`, `features.watcher`.
 
 Not part of the contract: importing `tmdl_lens.*` as a Python library (the

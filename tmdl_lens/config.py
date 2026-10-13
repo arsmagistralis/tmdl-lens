@@ -23,6 +23,7 @@ DEFAULTS = {
     "output_folder":    "",
     "overwrite_readme": False,
     "include_dax":      True,
+    "include_lineage":  False,
     "output_format":    "html",
     "skip_unchanged":   True,
     "watch_debounce":   10,
@@ -39,7 +40,7 @@ _STRING_KEYS = frozenset({
     "reports_folder", "output_folder", "output_format",
     "owner", "team", "refresh_schedule",
 })
-_BOOL_KEYS = frozenset({"overwrite_readme", "include_dax", "skip_unchanged"})
+_BOOL_KEYS = frozenset({"overwrite_readme", "include_dax", "include_lineage", "skip_unchanged"})
 
 
 # ---------------------------------------------------------------------------

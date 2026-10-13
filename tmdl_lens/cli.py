@@ -43,6 +43,14 @@ def _make_parser() -> argparse.ArgumentParser:
         help="omit DAX expressions",
     )
     parser.add_argument(
+        "--include-lineage", dest="include_lineage", action="store_true", default=None,
+        help="add a Mermaid lineage diagram (Markdown output only)",
+    )
+    parser.add_argument(
+        "--no-include-lineage", dest="include_lineage", action="store_false",
+        help="omit the lineage diagram",
+    )
+    parser.add_argument(
         "--overwrite", dest="overwrite", action="store_true", default=None,
         help="overwrite existing output files",
     )
@@ -84,6 +92,7 @@ _FALLBACKS = {
     "reports_folder": "",
     "output_folder": "",
     "include_dax": True,
+    "include_lineage": False,
     "output_format": "html",
     "overwrite_readme": False,
     "skip_unchanged": False,
@@ -102,6 +111,7 @@ def _build_config(args, saved: dict) -> PipelineConfig:
         reports_folder=pick(args.reports_folder, "reports_folder"),
         output_folder=pick(args.output_folder, "output_folder"),
         include_dax=pick(args.include_dax, "include_dax"),
+        include_lineage=pick(args.include_lineage, "include_lineage"),
         output_format=pick(args.format, "output_format"),
         overwrite=pick(args.overwrite, "overwrite_readme"),
         skip_unchanged=pick(args.skip_unchanged, "skip_unchanged"),
