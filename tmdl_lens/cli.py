@@ -6,11 +6,10 @@ no GUI dependencies. Installed as the `tmdl-lens` console command.
 """
 
 import argparse
-import json
 import os
 import sys
 
-from tmdl_lens.config import validate_config
+from tmdl_lens.config import check_types, read_file, validate_config, write_atomic
 from tmdl_lens.pipeline import Pipeline, PipelineConfig
 from tmdl_lens.version import __version__
 
@@ -32,8 +31,8 @@ def _make_parser() -> argparse.ArgumentParser:
         help="output folder for generated docs",
     )
     parser.add_argument(
-        "--format", choices=("html", "md"), default=None,
-        help="output format: html or md",
+        "--format", choices=("html", "md", "txt", "json"), default=None,
+        help="output format: html, md, txt or json",
     )
     parser.add_argument(
         "--include-dax", dest="include_dax", action="store_true", default=None,
@@ -42,6 +41,14 @@ def _make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-include-dax", dest="include_dax", action="store_false",
         help="omit DAX expressions",
+    )
+    parser.add_argument(
+        "--include-lineage", dest="include_lineage", action="store_true", default=None,
+        help="add a Mermaid lineage diagram (Markdown output only)",
+    )
+    parser.add_argument(
+        "--no-include-lineage", dest="include_lineage", action="store_false",
+        help="omit the lineage diagram",
     )
     parser.add_argument(
         "--overwrite", dest="overwrite", action="store_true", default=None,
@@ -81,31 +88,36 @@ def _make_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_settings(path: str) -> dict:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        if not isinstance(saved, dict):
-            saved = {}
-    except (OSError, json.JSONDecodeError):
-        saved = {}
-    return saved
+_FALLBACKS = {
+    "reports_folder": "",
+    "output_folder": "",
+    "include_dax": True,
+    "include_lineage": False,
+    "output_format": "html",
+    "overwrite_readme": False,
+    "skip_unchanged": False,
+    "owner": "",
+    "team": "",
+    "refresh_schedule": "",
+    "file_hashes": {},
+}
 
 
 def _build_config(args, saved: dict) -> PipelineConfig:
-    def pick(cli_value, key, fallback):
-        return cli_value if cli_value is not None else saved.get(key, fallback)
+    def pick(cli_value, key):
+        return cli_value if cli_value is not None else saved.get(key, _FALLBACKS[key])
 
     return PipelineConfig(
-        reports_folder=pick(args.reports_folder, "reports_folder", ""),
-        output_folder=pick(args.output_folder, "output_folder", ""),
-        include_dax=pick(args.include_dax, "include_dax", True),
-        output_format=pick(args.format, "output_format", "html"),
-        overwrite=pick(args.overwrite, "overwrite_readme", False),
-        skip_unchanged=pick(args.skip_unchanged, "skip_unchanged", False),
-        owner=pick(args.owner, "owner", ""),
-        team=pick(args.team, "team", ""),
-        refresh_schedule=pick(args.refresh_schedule, "refresh_schedule", ""),
+        reports_folder=pick(args.reports_folder, "reports_folder"),
+        output_folder=pick(args.output_folder, "output_folder"),
+        include_dax=pick(args.include_dax, "include_dax"),
+        include_lineage=pick(args.include_lineage, "include_lineage"),
+        output_format=pick(args.format, "output_format"),
+        overwrite=pick(args.overwrite, "overwrite_readme"),
+        skip_unchanged=pick(args.skip_unchanged, "skip_unchanged"),
+        owner=pick(args.owner, "owner"),
+        team=pick(args.team, "team"),
+        refresh_schedule=pick(args.refresh_schedule, "refresh_schedule"),
     )
 
 
@@ -113,14 +125,38 @@ def main(argv=None) -> int:
     parser = _make_parser()
     args = parser.parse_args(argv)
 
-    cfg_path = args.config
-    saved = _load_settings(cfg_path) if cfg_path else {}
-    config = _build_config(args, saved)
-
     def log(msg: str, level: str = "msg") -> None:
         if args.quiet and level in ("msg", "info"):
             return
         print(msg)
+
+    cfg_path = args.config
+    config_loaded = False
+    saved = {}
+    if cfg_path:
+        saved, load_error = read_file(cfg_path)
+        if load_error == "missing":
+            log(
+                f"warning: config file not found: {cfg_path} - using defaults "
+                "and CLI flags; the file will not be created",
+                "warn",
+            )
+        elif load_error:
+            log(f"error: could not load config file {cfg_path}: {load_error}", "err")
+            return 2
+        else:
+            config_loaded = True
+
+    build_source, type_warnings = check_types(saved, _FALLBACKS)
+    for warning in type_warnings:
+        log(f"warning: {warning}", "warn")
+    if config_loaded:
+        cfg_dir = os.path.dirname(os.path.abspath(cfg_path))
+        for key in ("reports_folder", "output_folder"):
+            value = build_source.get(key)
+            if isinstance(value, str) and value and not os.path.isabs(value):
+                build_source[key] = os.path.normpath(os.path.join(cfg_dir, value))
+    config = _build_config(args, build_source)
 
     if not config.reports_folder:
         log(
@@ -141,19 +177,17 @@ def main(argv=None) -> int:
         log(f"error: reports folder does not exist: {config.reports_folder}", "err")
         return 1
 
-    hashes = saved.get("file_hashes", {})
-    if not isinstance(hashes, dict):
-        hashes = {}
+    hashes = build_source.get("file_hashes", {})
 
     pipeline = Pipeline(config, saved_hashes=hashes, logger=log)
     result = pipeline.run()
 
-    if result.hashes and cfg_path:
-        saved["file_hashes"] = result.hashes
-        try:
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                json.dump(saved, f, indent=2)
-        except OSError:
+    if result.hashes and cfg_path and config_loaded:
+        old_hashes = saved.get("file_hashes")
+        if not isinstance(old_hashes, dict):
+            old_hashes = {}
+        saved["file_hashes"] = {**old_hashes, **result.hashes}
+        if not write_atomic(cfg_path, saved):
             log(f"warning: could not save content hashes to {cfg_path}", "warn")
 
     return 0 if result.error_count == 0 else 1

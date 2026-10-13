@@ -12,7 +12,7 @@ from tmdl_lens.source_resolver import (
     list_unresolved,
     resolve_sources,
 )
-from tmdl_lens.tmdl_parser import SourceExpression, Table, _classify_m_content
+from tmdl_lens.tmdl_parser import MParameter, SourceExpression, Table, _classify_m_content
 
 
 def test_label_native_query_sql():
@@ -253,3 +253,135 @@ def test_resolve_expression_referencing_missing_target():
     rs = resolved["x"]
     assert rs.unresolved is True
     assert "ghost" in rs.unresolved_reason
+
+
+def test_resolve_combine_expression_is_terminal_and_chains():
+    combined = _classify_m_content(
+        'let\n'
+        '    Combined = Table.Combine({#"q-a", #"q-b"})\n'
+        'in\n'
+        '    Combined',
+        "combined",
+    )
+    child = _classify_m_content(
+        'let\n'
+        '    Source = #"combined"\n'
+        'in\n'
+        '    Source',
+        "child",
+    )
+    resolved = resolve_sources([combined, child], [], tables=[])
+    assert resolved["combined"].unresolved is False
+    assert resolved["combined"].label == "Combines: q-a, q-b"
+    assert resolved["child"].unresolved is False
+    assert resolved["child"].derived_from == "combined"
+    assert resolved["child"].label == "combined -> Combines: q-a, q-b"
+
+
+def test_label_excel_local_and_sharepoint():
+    local = _classify_m_content('let s = Excel.Workbook(File.Contents("D:\\Data\\x.xlsx"), true) in s', "t")
+    assert _build_label(local, {}) == "Excel (local) -> D:\\Data\\x.xlsx"
+    web = _classify_m_content('let s = Excel.Workbook(Web.Contents("https://example.com/x.xlsx"), true) in s', "t")
+    assert _build_label(web, {}) == "Excel (SharePoint) -> https://example.com/x.xlsx"
+
+
+def test_resolve_generated_calendar_table():
+    helper = SourceExpression(name="first-day-helper", source_type="scalar_helper")
+    calendar = Table(
+        name="Calendar",
+        table_type="dim",
+        partition_type="m",
+        inline_source=_classify_m_content(
+            'let\n'
+            '    #"seed-day" = #"first-day-helper",\n'
+            '    Dates = List.Generate(() => #"seed-day", each _ < #date(2030, 1, 1), each Date.AddDays(_, 1)),\n'
+            '    Calendar = Table.FromList(Dates, Splitter.SplitByNothing())\n'
+            'in\n'
+            '    Calendar',
+            "Calendar",
+        ),
+    )
+    resolved = resolve_sources([helper], [], tables=[calendar])
+    rs = resolved["Calendar"]
+    assert rs.source_type == "generated"
+    assert rs.unresolved is False
+    assert rs.chain == []
+
+
+def test_resolve_derived_with_scratch_builder_keeps_real_lineage():
+    parent = _classify_m_content('let s = Sql.Database("srv", "db") in s', "real-query")
+    builders = [
+        "Table.FromRecords({[a = 1]})",
+        "List.Numbers(1, 3)",
+        "List.Generate(() => 0, each _ < 3, each _ + 1)",
+    ]
+    for builder in builders:
+        child = Table(
+            name="child",
+            table_type="fact",
+            partition_type="m",
+            inline_source=_classify_m_content(
+                'let\n'
+                '    Source = #"real-query",\n'
+                f'    Extra = {builder},\n'
+                '    Result = Table.SelectRows(Source, each true)\n'
+                'in\n'
+                '    Result',
+                "child",
+            ),
+        )
+        resolved = resolve_sources([parent], [], tables=[child])
+        rs = resolved["child"]
+        assert rs.source_type == "connector", builder
+        assert rs.unresolved is False, builder
+        assert rs.derived_from == "real-query", builder
+        assert rs.label == "real-query -> SQL -> srv -> db", builder
+
+
+def test_resolve_derived_from_parameter_with_scratch_builder_is_generated():
+    expr = _classify_m_content(
+        'let\n'
+        '    Start = #"StartYear",\n'
+        '    Years = List.Numbers(Start, 5),\n'
+        '    T = Table.FromList(Years, Splitter.SplitByNothing())\n'
+        'in\n'
+        '    T',
+        "years",
+    )
+    resolved = resolve_sources([expr], [MParameter(name="StartYear", value="2030")], tables=[])
+    assert resolved["years"].source_type == "generated"
+    assert resolved["years"].unresolved is False
+
+
+def test_resolve_derived_from_scalar_helper_is_unresolved():
+    helper = SourceExpression(name="cutoff", source_type="scalar_helper")
+    expr = _classify_m_content(
+        'let\n'
+        '    Source = #"cutoff"\n'
+        'in\n'
+        '    Source',
+        "x",
+    )
+    resolved = resolve_sources([helper, expr], [], tables=[])
+    assert resolved["x"].unresolved is True
+    assert resolved["x"].unresolved_reason == "first step references scalar helper 'cutoff'"
+
+
+def test_resolve_derived_from_parameter_is_unresolved():
+    expr = _classify_m_content(
+        'let\n'
+        '    Source = #"ServerName"\n'
+        'in\n'
+        '    Source',
+        "x",
+    )
+    resolved = resolve_sources([expr], [MParameter(name="ServerName", value="srv")], tables=[])
+    assert resolved["x"].unresolved is True
+    assert resolved["x"].unresolved_reason == "first step references parameter 'ServerName'"
+
+
+def test_resolve_unknown_uses_classification_reason():
+    expr = _classify_m_content("let x = SomeUnknownThing(y) in x", "x")
+    resolved = resolve_sources([expr], [], tables=[])
+    assert resolved["x"].unresolved is True
+    assert resolved["x"].unresolved_reason == "no connector, combine or query reference found"

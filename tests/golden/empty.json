@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "report": {
+    "name": "empty",
+    "owner": null,
+    "team": null,
+    "refresh_schedule": null
+  },
+  "model": {
+    "culture": null,
+    "compatibility_level": null,
+    "data_source_version": null
+  },
+  "tables": [],
+  "relationships": [],
+  "expressions": [],
+  "parameters": [],
+  "functions": [],
+  "roles": [],
+  "warnings": []
+}

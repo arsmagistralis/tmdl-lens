@@ -117,12 +117,15 @@ class SourceExpression:
       parameter           IsParameterQuery = true
       function_def        custom function definition
       scalar_helper       returns a scalar value, not a table
+      generated           table built from scratch in M (List.Generate etc.)
       unknown             could not be classified
     """
     name: str
     source_type: str = "unknown"
     query_group: str = ""
     raw_m: str = ""
+    classification_reason: str = ""
+    builds_table: bool = False
 
     # Connector identity (populated when source_type == "connector")
     connector_namespace: str = ""
@@ -799,87 +802,104 @@ def _strip_m_comments(content: str) -> str:
     return "\n".join(result_lines)
 
 
-# ---------------------------------------------------------------------------
-# Core inline source classifier
-#
-# Scans the full table file content (comments stripped) for connector
-# signatures. No M block extraction - we don't care where in the code
-# the connector appears, only that it's there and not inside a commented block.
-#
-# Priority order:
-#   1. Scalar helper (PBI_ResultType signals non-table output)
-#   2. Table.Combine / Table.Append - union source
-#   3. Inline / hardcoded - #table(...) or Table.FromRows(...)
-#   4. Generic connector - any Namespace.Function( pattern (primary path)
-#   5. Derived / derived_table - Source = #"name" or Source = TableName
-#   6. Unresolved
-# ---------------------------------------------------------------------------
+_SCALAR_RESULT_TYPES = ("Text", "Number", "Date", "DateTime", "Boolean")
 
-def _classify_m_content(content: str, table_name: str, result_type: str = "") -> SourceExpression:
-    """
-    Classify the data source of an M partition by scanning the full file
-    content (with comments stripped). Returns a populated SourceExpression.
-    """
-    expr = SourceExpression(name=table_name, raw_m=content)
-    clean = _strip_m_comments(content)
+_CONNECTOR_CALL_RE = re.compile(r'\b([A-Z][A-Za-z0-9]+)\.([A-Z][A-Za-z0-9]+)\s*\(')
 
-    # 1. Scalar helper
-    if result_type in ("Text", "Number", "Date", "DateTime", "Boolean"):
-        expr.source_type = "scalar_helper"
-        return expr
+_COMBINE_RE = re.compile(r'\bTable\.(?:Combine|Append)\s*\(\s*\{')
 
-    # 2. Table.Combine / Table.Append - these ARE the source, not transformations
-    #    Uses balanced brace matching to handle nested {} inside arguments
-    combine_match = re.search(r'\bTable\.(?:Combine|Append)\s*\(\s*\{', clean)
-    if combine_match:
-        start_pos = combine_match.end() - 1  # position of opening {
-        brace_count = 1
-        end_pos = start_pos + 1
-        while brace_count > 0 and end_pos < len(clean):
-            if clean[end_pos] == '{':
-                brace_count += 1
-            elif clean[end_pos] == '}':
-                brace_count -= 1
-            end_pos += 1
-        if brace_count == 0:
-            inner_content = clean[start_pos + 1:end_pos - 1]
-            expr.source_type = "table_combine"
-            refs = re.findall(r'#"([^"]+)"', inner_content)
-            if not refs:
-                refs = re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)\b', inner_content)
-            expr.combine_sources = [r.strip() for r in refs if r.strip()]
-            return expr
+_SCRATCH_BUILDER_RE = re.compile(
+    r'\b(?:List\.(?:Generate|Dates|DateTimes|Numbers)|Table\.(?:FromList|FromRecords|FromColumns))\s*\('
+)
 
-    # 3. Inline / hardcoded - these are NOT connectors, matches stay unchanged
-    if "#table(" in clean:
-        expr.source_type = "hardcoded"
-        return expr
-    if "Table.FromRows(" in clean:
-        expr.source_type = "embedded"
-        return expr
+_STEP_NAME = r'(?:#"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
 
-    # 4. Generic connector detection - primary path for external connectors
-    #    Matches any Namespace.Function( call, excluding M stdlib and transforms
-    for call in re.finditer(r'\b([A-Z][A-Za-z]+\.[A-Z][A-Za-z]+)\s*\(', clean):
-        namespace, function = call.group(1).split(".", 1)
-        if namespace in _STDLIB_NAMESPACES or f"{namespace}.{function}" in _TRANSFORM_FNS:
+_STEP_ASSIGN_RE = re.compile(r'(?:\blet\b|,)\s*(' + _STEP_NAME + r')\s*=(?![=>])')
+
+_STEP_ALIAS_RE = re.compile(
+    r'(?:\blet\b|,)\s*(' + _STEP_NAME + r')\s*=\s*#"([^"]+)"\s*(?=,|\bin\b|$)'
+)
+
+_REFERENCE_EXCLUDED = frozenset({
+    "let", "in", "each", "true", "false", "null",
+    "Table", "List", "Record", "Json", "Xml", "Csv",
+    "Excel", "File", "Text", "Date", "DateTime", "Binary",
+    "Number", "Duration", "Time", "Splitter", "Combiner",
+    "Lines", "Type", "Function", "Uri", "Compression",
+    "Value", "Expression", "Metadata", "Error",
+})
+
+
+def _step_key(token: str) -> str:
+    return token[2:-1] if token.startswith('#"') else token
+
+
+def _split_top_level(text: str) -> list:
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_string = False
+    for ch in text:
+        if ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                items.append("".join(current))
+                current = []
+                continue
+        current.append(ch)
+    items.append("".join(current))
+    return [item.strip() for item in items if item.strip()]
+
+
+def _combine_items(clean: str) -> list:
+    match = _COMBINE_RE.search(clean)
+    if not match:
+        return []
+    start = match.end() - 1
+    depth = 1
+    end = start + 1
+    while depth > 0 and end < len(clean):
+        if clean[end] == "{":
+            depth += 1
+        elif clean[end] == "}":
+            depth -= 1
+        end += 1
+    if depth != 0:
+        return []
+    return _split_top_level(clean[start + 1:end - 1])
+
+
+def _combine_sources(clean: str, items: list) -> list:
+    aliases = {_step_key(m.group(1)): m.group(2) for m in _STEP_ALIAS_RE.finditer(clean)}
+    steps = {_step_key(m.group(1)) for m in _STEP_ASSIGN_RE.finditer(clean)}
+    sources: list[str] = []
+    for item in items:
+        if not re.fullmatch(_STEP_NAME, item):
             continue
-        expr.source_type = "connector"
-        expr.connector_namespace = namespace
-        expr.connector_function = function
-        _extract_connector_details(expr, clean, namespace, function)
-        return expr
+        key = _step_key(item)
+        if key in aliases:
+            name = aliases[key]
+        elif key in steps:
+            continue
+        elif not item.startswith('#"') and key in _REFERENCE_EXCLUDED:
+            continue
+        else:
+            name = key
+        if name not in sources:
+            sources.append(name)
+    return sources
 
-    # 5a. Derived - references a shared expression: Source = #"name"
+
+def _first_step_reference(clean: str) -> Optional[tuple]:
     ref_quoted = re.search(r'\bSource\s*=\s*#"([^"]+)"', clean)
     if ref_quoted:
-        expr.source_type = "derived"
-        expr.derived_from = ref_quoted.group(1)
-        return expr
+        return "derived", ref_quoted.group(1)
 
-    # 5b. Derived table - bare table name as first Source step
-    #     Matches: Source = SomeName, (with comma or newline after)
-    #     Excludes known M stdlib prefixes and anything followed by (
     ref_bare = re.search(
         r'\bSource\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?=,|\n|$)',
         clean, re.MULTILINE
@@ -887,26 +907,15 @@ def _classify_m_content(content: str, table_name: str, result_type: str = "") ->
     if ref_bare:
         ref = ref_bare.group(1).strip()
         after = clean[ref_bare.end():].lstrip()
-        if not after.startswith("(") and ref not in (
-            "let", "in", "each", "true", "false", "null",
-            "Table", "List", "Record", "Json", "Xml", "Csv",
-            "Excel", "File", "Text", "Date", "DateTime", "Binary",
-            "Number", "Duration", "Time", "Splitter", "Combiner",
-            "Lines", "Type", "Function", "Uri", "Compression",
-            "Value", "Expression", "Metadata", "Error",
-        ):
-            expr.source_type = "derived_table"
-            expr.derived_from = ref
-            return expr
+        if not after.startswith("(") and ref not in _REFERENCE_EXCLUDED:
+            return "derived_table", ref
 
     alias_quoted = re.search(
         r'\blet\s+(?:[A-Za-z_][A-Za-z0-9_]*|#"[^"]+")\s*=\s*#"([^"]+)"',
         clean,
     )
     if alias_quoted:
-        expr.source_type = "derived"
-        expr.derived_from = alias_quoted.group(1)
-        return expr
+        return "derived", alias_quoted.group(1)
 
     alias_bare = re.search(
         r'\blet\s+(?:[A-Za-z_][A-Za-z0-9_]*|#"[^"]+")\s*=\s*([A-Za-z_][A-Za-z0-9_]*)(?=\s*(?:,|in\b)|$)',
@@ -914,19 +923,68 @@ def _classify_m_content(content: str, table_name: str, result_type: str = "") ->
     )
     if alias_bare:
         ref = alias_bare.group(1).strip()
-        if ref not in (
-            "let", "in", "each", "true", "false", "null",
-            "Table", "List", "Record", "Json", "Xml", "Csv",
-            "Excel", "File", "Text", "Date", "DateTime", "Binary",
-            "Number", "Duration", "Time", "Splitter", "Combiner",
-            "Lines", "Type", "Function", "Uri", "Compression",
-            "Value", "Expression", "Metadata", "Error",
-        ):
-            expr.source_type = "derived_table"
-            expr.derived_from = ref
+        if ref not in _REFERENCE_EXCLUDED:
+            return "derived_table", ref
+
+    return None
+
+
+def _classify_m_content(content: str, table_name: str, result_type: str = "") -> SourceExpression:
+    """
+    Classify the data source of an M partition by scanning the full content
+    (with comments stripped). The precedence order is documented in
+    docs/parser-internals.md. Returns a populated SourceExpression.
+    """
+    expr = SourceExpression(name=table_name, raw_m=content)
+    clean = _strip_m_comments(content)
+    expr.builds_table = _SCRATCH_BUILDER_RE.search(clean) is not None
+
+    if result_type in _SCALAR_RESULT_TYPES:
+        expr.source_type = "scalar_helper"
+        expr.classification_reason = f"annotation PBI_ResultType = {result_type}"
+        return expr
+
+    if "#table(" in clean:
+        expr.source_type = "hardcoded"
+        expr.classification_reason = "inline data literal"
+        return expr
+    if "Table.FromRows(" in clean:
+        expr.source_type = "embedded"
+        expr.classification_reason = "inline data literal"
+        return expr
+
+    for call in _CONNECTOR_CALL_RE.finditer(clean):
+        namespace, function = call.group(1), call.group(2)
+        if namespace in _STDLIB_NAMESPACES or f"{namespace}.{function}" in _TRANSFORM_FNS:
+            continue
+        expr.source_type = "connector"
+        expr.connector_namespace = namespace
+        expr.connector_function = function
+        expr.classification_reason = f"connector call {namespace}.{function}"
+        _extract_connector_details(expr, clean, namespace, function)
+        return expr
+
+    items = _combine_items(clean)
+    if items:
+        sources = _combine_sources(clean, items)
+        if sources:
+            expr.source_type = "table_combine"
+            expr.combine_sources = sources
+            expr.classification_reason = f"combine of {len(sources)} queries"
             return expr
 
-    # 6. Unresolved
+    reference = _first_step_reference(clean)
+    if reference:
+        expr.source_type, expr.derived_from = reference
+        expr.classification_reason = f"first step references {expr.derived_from}"
+        return expr
+
+    if expr.builds_table:
+        expr.source_type = "generated"
+        expr.classification_reason = "generated in M"
+        return expr
+
+    expr.classification_reason = "no connector, combine or query reference found"
     return expr
 
 
@@ -1109,6 +1167,10 @@ def _extract_connector_details(expr: SourceExpression, clean: str, namespace: st
         quoted_pattern = r'File\.Contents\s*\(\s*"([^"]+)"'
         bare_pattern = r'File\.Contents\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)'
         expr.file_name = _extract_string_or_param_arg(clean, quoted_pattern, bare_pattern) or ""
+        if not expr.file_name:
+            web_quoted = r'Web\.Contents\s*\(\s*"([^"]+)"'
+            web_bare = r'Web\.Contents\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)'
+            expr.url = _extract_string_or_param_arg(clean, web_quoted, web_bare) or ""
         sheet = re.search(r'Item\s*=\s*"([^"]+)"', clean)
         if sheet:
             expr.sheet_name = sheet.group(1)
@@ -1600,6 +1662,7 @@ def _classify_expression(block: str, name: str) -> SourceExpression:
 
     if "IsParameterQuery=true" in block or "IsParameterQuery = true" in block:
         expr.source_type = "parameter"
+        expr.classification_reason = "IsParameterQuery = true"
         val = re.match(r"['\"]?" + re.escape(name) + r"['\"]?\s*=\s*(.+?)\s+meta", block, re.DOTALL)
         if val:
             expr.param_value = val.group(1).strip().strip('"')
@@ -1607,14 +1670,19 @@ def _classify_expression(block: str, name: str) -> SourceExpression:
         expr.param_type = t.group(1) if t else "Text"
         return expr
 
-    if _is_function_expression(block):
-        expr.source_type = "function_def"
-        return expr
-
     rt_m = re.search(r"PBI_ResultType\s*=\s*(\S+)", block)
     rt = rt_m.group(1).strip() if rt_m else ""
+
+    if _is_function_expression(block):
+        expr.source_type = "function_def"
+        expr.classification_reason = (
+            "annotation PBI_ResultType = Function" if rt else "function signature"
+        )
+        return expr
+
     if rt in ("Date", "DateTime", "Number", "Text", "Boolean") and "Table" not in rt:
         expr.source_type = "scalar_helper"
+        expr.classification_reason = f"annotation PBI_ResultType = {rt}"
         return expr
 
     classified = _classify_m_content(block, name)

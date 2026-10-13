@@ -5,8 +5,9 @@ Takes a parsed SemanticModel and resolved sources dict and produces
 a structured README.md for each Power BI report.
 """
 
+import hashlib
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from tmdl_lens.tmdl_parser import SemanticModel, Table
 from tmdl_lens.source_resolver import CONNECTOR_TYPE_LABEL, ResolvedSource, get_table_source
@@ -43,6 +44,7 @@ _SOURCE_TYPE_LABEL = {
     "unresolved":    "Unresolved",
     "function_def":  "Helper Function",
     "scalar_helper": "Scalar Helper",
+    "generated":     "Generated (M)",
 }
 
 def _source_type_label(source_type: str) -> str:
@@ -68,13 +70,13 @@ def _connector_type_label(rs: ResolvedSource) -> str:
 def _source_label(rs: ResolvedSource) -> str:
     """
     Returns the display string for the Source column in the Data Sources table.
-    Uses rs.label which already contains the full chain (e.g. 'FVInput -> Smartsheet (US)').
+    Uses rs.label which already contains the full chain (e.g. 'orders-source -> Web API').
     Falls back to manual_label if set. Returns '-' for scalar/helper types.
     """
     if rs.manual_label:
         return rs.manual_label
     # Non-source types return '-' regardless of unresolved status
-    if rs.source_type in ("scalar_helper", "function_def", "embedded", "hardcoded", "dynamic"):
+    if rs.source_type in ("scalar_helper", "function_def", "embedded", "hardcoded", "dynamic", "generated"):
         return "-"
     if rs.unresolved:
         return rs.unresolved_reason or "Unresolved"
@@ -139,6 +141,260 @@ def _collect(model: SemanticModel, show_hidden: bool) -> dict:
     }
 
 
+_SECTIONS = [
+    ("overview",       "Overview"),
+    ("data_sources",   "1. Data Sources"),
+    ("table_details",  "2. Table Details"),
+    ("measures",       "3. Measures"),
+    ("functions",      "4. Functions"),
+    ("relationships",  "5. Relationships"),
+    ("security_roles", "6. Security Roles"),
+    ("m_parameters",   "7. M Parameters"),
+    ("unresolved",     "Unresolved Sources"),
+    ("statistics",     "8. Model Statistics"),
+]
+
+_SECTION_TITLE = dict(_SECTIONS)
+
+
+@dataclass(frozen=True)
+class _Code:
+    text: str
+    suffix: str = ""
+
+
+@dataclass(frozen=True)
+class _CodeList:
+    names: tuple
+
+
+@dataclass(frozen=True)
+class _CodeRefs:
+    pairs: tuple
+
+
+def _code_or_dash(text: str):
+    return _Code(text) if text else "-"
+
+
+def _visible_relationships(model: SemanticModel) -> list:
+    return [
+        r for r in model.relationships
+        if not _is_auto_date_table(r.from_table) and not _is_auto_date_table(r.to_table)
+    ]
+
+
+def _support_split(support_tables: list[Table]) -> tuple[list, list, list, list]:
+    return (
+        [t for t in support_tables if t.table_type == "calculated"],
+        [t for t in support_tables if t.table_type == "field_parameter"],
+        [t for t in support_tables if t.table_type == "measures_only"],
+        [t for t in support_tables if t.table_type == "calc_group"],
+    )
+
+
+def _overview_rows(config: dict, model: SemanticModel) -> list:
+    rows = []
+    if config.get("owner"):
+        rows.append(("Owner", config["owner"]))
+    if config.get("team"):
+        rows.append(("Team", config["team"]))
+    if config.get("refresh_schedule"):
+        rows.append(("Refresh Schedule", config["refresh_schedule"]))
+    rows.extend([
+        ("Culture", model.model_culture or "-"),
+        ("Compatibility Level", model.database_compatibility_level or "-"),
+        ("Data Source Version", model.model_data_source_version or "-"),
+    ])
+    return rows
+
+
+def _source_rows(tables: list[Table], resolved: dict[str, ResolvedSource], mark_hidden: bool) -> list:
+    rows = []
+    for t in tables:
+        rs = get_table_source(t, resolved)
+        src_type = _connector_type_label(rs) if rs else "-"
+        label = _source_label(rs) if rs else "-"
+        name = _Code(t.name, " (hidden)") if mark_hidden and t.is_hidden else _Code(t.name)
+        rows.append((name, src_type, label))
+    return rows
+
+
+def _support_rows(support_tables: list[Table]) -> list:
+    return [(_Code(t.name), _table_type_label(t.table_type)) for t in support_tables]
+
+
+def _column_rows(columns: list) -> list:
+    return [
+        (
+            _Code(c.name),
+            _dtype(c.data_type),
+            _code_or_dash(c.format_string),
+            c.summarize_by or "-",
+            _code_or_dash(c.source_column),
+            _code_or_dash(c.sort_by_column),
+            c.description or "-",
+            "Hidden" if c.is_hidden else "",
+        )
+        for c in columns
+    ]
+
+
+def _table_measure_rows(measures: list) -> list:
+    return [
+        (
+            _Code(m.name),
+            _code_or_dash(m.format_string),
+            m.description or "-",
+            "Hidden" if m.is_hidden else "",
+        )
+        for m in measures
+    ]
+
+
+def _calc_item_rows(items: list) -> list:
+    return [
+        (_Code(i.name), str(i.ordinal), _code_or_dash(i.format_string_expression))
+        for i in items
+    ]
+
+
+def _format_groups(pairs: list) -> tuple[list, int, int]:
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for fmt, name, table_name in pairs:
+        key = fmt.strip() if fmt.strip() else "(none)"
+        groups.setdefault(key, []).append((name, table_name))
+    sorted_groups = sorted(groups.items(), key=lambda x: -len(x[1]))
+    return sorted_groups, len(pairs), len(groups)
+
+
+def _format_rows(groups: list) -> list:
+    return [
+        (
+            _Code(fmt) if fmt != "(none)" else "(none)",
+            str(len(items)),
+            _CodeRefs(tuple(items)),
+        )
+        for fmt, items in groups
+    ]
+
+
+def _column_format_pairs(tables: list[Table]) -> list:
+    return [(c.format_string, c.name, t.name) for t in tables for c in t.columns]
+
+
+def _measure_format_pairs(measures: list) -> list:
+    return [(m.format_string, m.name, table_name) for table_name, m in measures]
+
+
+def _measure_folders(measures: list) -> list:
+    folders: dict[str, list[tuple]] = {}
+    for table_name, m in measures:
+        folders.setdefault(m.display_folder or "General", []).append((table_name, m))
+    return [(folder, folders[folder]) for folder in sorted(folders.keys())]
+
+
+def _folder_measure_rows(items: list) -> list:
+    return [
+        (
+            _Code(m.name),
+            _Code(table_name),
+            _code_or_dash(m.format_string),
+            m.description or "-",
+        )
+        for table_name, m in items
+    ]
+
+
+def _function_rows(model: SemanticModel) -> list:
+    usage_map = _build_function_usage_map(model)
+    return [
+        (
+            _Code(fn.name),
+            _CodeRefs(tuple(usage_map.get(fn.name, ()))),
+            fn.description or "-",
+        )
+        for fn in model.functions
+    ]
+
+
+def _relationship_rows(relationships: list, with_cardinality: bool) -> list:
+    rows = []
+    for r in relationships:
+        row = [_Code(r.from_table), _Code(r.from_column), _Code(r.to_table), _Code(r.to_column)]
+        if with_cardinality:
+            row.append(r.cardinality or "-")
+        row += [r.cross_filtering_behavior, r.security_filtering_behavior]
+        rows.append(tuple(row))
+    return rows
+
+
+def _role_rows(model: SemanticModel) -> list:
+    rows = []
+    for role in model.security_roles:
+        dynamic = f"Yes ({role.dynamic_function})" if role.is_dynamic else "No"
+        if not role.table_filters:
+            rows.append((_Code(role.name), "-", "-", dynamic))
+            continue
+        for i, tf in enumerate(role.table_filters):
+            rows.append((
+                _Code(role.name) if i == 0 else "",
+                _Code(tf.table),
+                _Code(tf.dax_filter),
+                dynamic if i == 0 else "",
+            ))
+    return rows
+
+
+def _parameter_rows(model: SemanticModel, dash_blank_value: bool) -> list:
+    usage_map = _build_param_usage_map(model)
+    rows = []
+    for p in model.m_parameters:
+        value = _Code(p.value) if p.value.strip() or not dash_blank_value else "-"
+        rows.append((
+            _Code(p.name),
+            p.param_type,
+            value,
+            _CodeList(tuple(usage_map.get(p.name, []))),
+        ))
+    return rows
+
+
+def _unresolved_rows(resolved: dict[str, ResolvedSource]) -> list:
+    return [
+        (_Code(rs.expression_name), rs.unresolved_reason)
+        for rs in resolved.values() if rs.unresolved
+    ]
+
+
+def _statistics_rows(
+    model: SemanticModel,
+    loaded_tables: list[Table],
+    support_tables: list[Table],
+    staging_tables: list[Table],
+    hidden_tables: list[Table],
+) -> list:
+    calc, fp, mo, cg = _support_split(support_tables)
+    measure_count = sum(len(t.measures) for t in model.tables)
+    calc_col_count = sum(1 for t in model.tables for c in t.columns if c.is_calculated)
+
+    def names(tables):
+        return _CodeList(tuple(t.name for t in tables))
+
+    return [
+        ("Loaded Tables",        str(len(loaded_tables)),  names(loaded_tables)),
+        ("Hidden Tables",        str(len(hidden_tables)),  names(hidden_tables)),
+        ("Calculated Tables",    str(len(calc)),           names(calc)),
+        ("Field Parameters",     str(len(fp)),             names(fp)),
+        ("Measures-Only Tables", str(len(mo)),             names(mo)),
+        ("Calculation Groups",   str(len(cg)),             names(cg)),
+        ("Not Loaded",           str(len(staging_tables)), names(staging_tables)),
+        ("Relationships",        str(len(_visible_relationships(model))), "-"),
+        ("Measures",             str(measure_count),       "-"),
+        ("Calculated Columns",   str(calc_col_count),      "-"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Section helpers
 # ---------------------------------------------------------------------------
@@ -152,19 +408,12 @@ def _model_summary(
     n_loaded   = len(loaded_tables)
     n_staging  = len(staging_tables)
     n_meas     = sum(len(t.measures) for t in model.tables)
-    visible_rels = [
-        r for r in model.relationships
-        if not _is_auto_date_table(r.from_table) and not _is_auto_date_table(r.to_table)
-    ]
-    n_rels = len(visible_rels)
+    n_rels     = len(_visible_relationships(model))
 
     parts = [f"{n_loaded} loaded {'table' if n_loaded == 1 else 'tables'}"]
     if support_tables:
         labels = []
-        calc   = [t for t in support_tables if t.table_type == "calculated"]
-        fp     = [t for t in support_tables if t.table_type == "field_parameter"]
-        mo     = [t for t in support_tables if t.table_type == "measures_only"]
-        cg     = [t for t in support_tables if t.table_type == "calc_group"]
+        calc, fp, mo, cg = _support_split(support_tables)
         if calc: labels.append(f"{len(calc)} calculated {'table' if len(calc) == 1 else 'tables'}")
         if fp:   labels.append(f"{len(fp)} field {'parameter' if len(fp) == 1 else 'parameters'}")
         if mo:   labels.append(f"{len(mo)} measures-only {'table' if len(mo) == 1 else 'tables'}")
@@ -197,22 +446,51 @@ def _md_row(*cells) -> str:
     return "| " + " | ".join(_md_cell(c) for c in cells) + " |"
 
 
+def _md_text(cell) -> str:
+    if isinstance(cell, _Code):
+        return f"`{cell.text}`{cell.suffix}"
+    if isinstance(cell, _CodeList):
+        return ", ".join(f"`{n}`" for n in cell.names) if cell.names else "-"
+    if isinstance(cell, _CodeRefs):
+        return ", ".join(f"`{c}` ({p})" for c, p in cell.pairs) if cell.pairs else "-"
+    return str(cell)
+
+
+def _md_table_rows(rows: list) -> list[str]:
+    return [_md_row(*(_md_text(cell) for cell in row)) for row in rows]
+
+
+def _section_anchor(key: str) -> str:
+    return key.replace("_", "-")
+
+
+def _rendered_sections(resolved: dict[str, ResolvedSource]) -> list:
+    has_unresolved = any(rs.unresolved for rs in resolved.values())
+    return [(key, title) for key, title in _SECTIONS if key != "unresolved" or has_unresolved]
+
+
+def _md_title(key: str) -> str:
+    if key == "unresolved":
+        return f"⚠ {_SECTION_TITLE[key]}"
+    return _SECTION_TITLE[key]
+
+
+def _md_heading(key: str) -> str:
+    return f'<a id="{_section_anchor(key)}"></a>\n## {_md_title(key)}'
+
+
+def _md_contents(resolved: dict[str, ResolvedSource]) -> str:
+    lines = ["**Contents**", ""]
+    lines += [f"- [{_md_title(key)}](#{_section_anchor(key)})" for key, _ in _rendered_sections(resolved)]
+    lines += ["", "---", ""]
+    return "\n".join(lines)
+
+
 def _overview_section(config: dict, model: SemanticModel) -> str:
-    rows = []
-    if config.get("owner"):
-        rows.append(_md_row("**Owner**", config["owner"]))
-    if config.get("team"):
-        rows.append(_md_row("**Team**", config["team"]))
-    if config.get("refresh_schedule"):
-        rows.append(_md_row("**Refresh Schedule**", config["refresh_schedule"]))
-    rows.extend([
-        _md_row("**Culture**", model.model_culture or "-"),
-        _md_row("**Compatibility Level**", model.database_compatibility_level or "-"),
-        _md_row("**Data Source Version**", model.model_data_source_version or "-"),
-    ])
+    rows = [_md_row(f"**{label}**", value) for label, value in _overview_rows(config, model)]
 
     lines = [
-        "## Overview",
+        _md_heading("overview"),
         "",
         "| Property | Value |",
         "|---|---|",
@@ -224,14 +502,138 @@ def _overview_section(config: dict, model: SemanticModel) -> str:
     return "\n".join(lines)
 
 
+_LINEAGE_OMITTED_TYPES = ("function_def", "scalar_helper")
+
+_LINEAGE_SHAPES = {
+    "table":  '{id}["{label}"]',
+    "query":  '{id}("{label}")',
+    "source": '{id}[("{label}")]',
+    "end":    '{id}(["{label}"])',
+}
+
+
+def _mermaid_id(identity: str) -> str:
+    return "n" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:10]
+
+
+def _mermaid_label(text: str) -> str:
+    return (
+        _text_flat(text)
+        .replace("&", "#amp;")
+        .replace('"', "#quot;")
+        .replace("<", "#lt;")
+        .replace(">", "#gt;")
+    )
+
+
+def _lineage_source_identity(rs: ResolvedSource) -> tuple[str, str]:
+    label = _connector_type_label(rs)
+    detail = ""
+    if rs.server and rs.database:
+        detail = f"{rs.server} / {rs.database}"
+    else:
+        detail = next(
+            (v for v in (rs.server, rs.url, rs.entity, rs.sharepoint_url, rs.file_name, rs.dsn) if v),
+            "",
+        )
+    text = f"{label}: {detail}" if detail else label
+    return f"source:{label}|{detail}", text
+
+
+def _lineage_graph(collected: dict, resolved: dict[str, ResolvedSource], model: SemanticModel) -> tuple[dict, set]:
+    tables = collected["loaded"] + collected["staging"]
+    table_names = {t.name for t in tables}
+    combine_lookup = {e.name: list(e.combine_sources) for e in model.source_expressions}
+    for t in model.tables:
+        if t.inline_source is not None:
+            combine_lookup[t.name] = list(t.inline_source.combine_sources)
+    nodes: dict[str, tuple[str, str, bool]] = {}
+    edges: set[tuple[str, str]] = set()
+
+    def node(kind: str, identity: str, label: str, unresolved: bool = False) -> str:
+        node_id = _mermaid_id(identity)
+        nodes.setdefault(node_id, (kind, label, unresolved))
+        return node_id
+
+    def named(name: str) -> str:
+        if name in table_names:
+            table = next(t for t in tables if t.name == name)
+            label = f"{name} (hidden)" if table.is_hidden else name
+            return node("table", f"table:{name}", label)
+        return node("query", f"query:{name}", name)
+
+    visited: set[str] = set()
+
+    def walk(target: str, owner: str, rs: ResolvedSource, path: list[str]) -> None:
+        if rs.source_type in _LINEAGE_OMITTED_TYPES and not rs.unresolved:
+            return
+        downstream = target
+        for name in path + list(rs.chain):
+            upstream = named(name)
+            edges.add((upstream, downstream))
+            downstream = upstream
+        names = path + list(rs.chain)
+        terminal = names[-1] if names else owner
+        if rs.unresolved:
+            end = node("end", f"end:unresolved:{terminal}", "Unresolved", unresolved=True)
+            edges.add((end, downstream))
+        elif rs.source_type == "connector":
+            identity, text = _lineage_source_identity(rs)
+            edges.add((node("source", identity, text), downstream))
+        elif rs.source_type == "table_combine":
+            for source_name in combine_lookup.get(terminal, []):
+                upstream = named(source_name)
+                edges.add((upstream, downstream))
+                if source_name in resolved and source_name not in visited:
+                    visited.add(source_name)
+                    walk(upstream, source_name, resolved[source_name], [])
+        else:
+            end = node("end", f"end:{rs.source_type}:{terminal}", _source_type_label(rs.source_type))
+            edges.add((end, downstream))
+
+    for t in tables:
+        rs = get_table_source(t, resolved)
+        target = named(t.name)
+        if rs is not None:
+            walk(target, t.name, rs, [t.source_ref] if t.source_ref else [])
+    return nodes, edges
+
+
+def _lineage_section(collected: dict, resolved: dict[str, ResolvedSource], model: SemanticModel) -> str:
+    nodes, edges = _lineage_graph(collected, resolved, model)
+    lines = [
+        "### Lineage",
+        "",
+        "> Sources on the left, report tables on the right, shared queries in between. "
+        "Helper functions, scalar helpers and parameters are omitted.",
+        "",
+    ]
+    if not nodes:
+        lines += ["*No lineage to draw.*", ""]
+        return "\n".join(lines)
+    lines += ["```mermaid", "flowchart LR"]
+    for node_id in sorted(nodes):
+        kind, label, _ = nodes[node_id]
+        lines.append("    " + _LINEAGE_SHAPES[kind].format(id=node_id, label=_mermaid_label(label)))
+    for upstream, downstream in sorted(edges):
+        lines.append(f"    {upstream} --> {downstream}")
+    unresolved = sorted(node_id for node_id, (_, _, flag) in nodes.items() if flag)
+    if unresolved:
+        lines.append("    classDef unresolved stroke-dasharray: 4 4")
+        lines.append(f"    class {','.join(unresolved)} unresolved")
+    lines += ["```", ""]
+    return "\n".join(lines)
+
+
 def _data_sources_section(
     loaded_tables: list[Table],
     staging_tables: list[Table],
     support_tables: list[Table],
     resolved: dict[str, ResolvedSource],
     model: SemanticModel,
+    lineage: str = "",
 ) -> str:
-    lines = ["## 1. Data Sources", ""]
+    lines = [_md_heading("data_sources"), ""]
     lines += [_model_summary(loaded_tables, staging_tables, support_tables, model), ""]
 
     if loaded_tables:
@@ -239,16 +641,7 @@ def _data_sources_section(
             "| Table | Source Type | Source |",
             "|---|---|---|",
         ]
-        for t in loaded_tables:
-            rs = get_table_source(t, resolved)
-            if rs:
-                src_type = _connector_type_label(rs)
-                label    = _source_label(rs)
-            else:
-                src_type = "-"
-                label    = "-"
-            name_cell = f"`{t.name}` (hidden)" if t.is_hidden else f"`{t.name}`"
-            lines.append(_md_row(name_cell, src_type, label))
+        lines += _md_table_rows(_source_rows(loaded_tables, resolved, mark_hidden=True))
         lines.append("")
     else:
         lines += ["*No loaded tables found.*", ""]
@@ -260,8 +653,7 @@ def _data_sources_section(
             "| Table | Type |",
             "|---|---|",
         ]
-        for t in support_tables:
-            lines.append(_md_row(f"`{t.name}`", _table_type_label(t.table_type)))
+        lines += _md_table_rows(_support_rows(support_tables))
         lines.append("")
 
     if staging_tables:
@@ -274,21 +666,16 @@ def _data_sources_section(
             "| Table | Source Type | Source |",
             "|---|---|---|",
         ]
-        for t in staging_tables:
-            rs = get_table_source(t, resolved)
-            if rs:
-                src_type = _connector_type_label(rs)
-                label    = _source_label(rs)
-            else:
-                src_type = "-"
-                label    = "-"
-            lines.append(_md_row(f"`{t.name}`", src_type, label))
+        lines += _md_table_rows(_source_rows(staging_tables, resolved, mark_hidden=False))
         lines.append("")
         staging_fmt = _column_format_string_inventory(staging_tables, heading="Not Loaded Table Format Strings Used")
         if staging_fmt:
             lines.append(staging_fmt)
     else:
         lines += ["### Not Loaded", "", "*None.*", ""]
+
+    if lineage:
+        lines.append(lineage)
 
     lines += ["---", ""]
     return "\n".join(lines)
@@ -436,16 +823,7 @@ def _table_detail_block(
             "| Column | Type | Format | Summarize By | Source Column | Sort By | Description | Hidden |",
             "|---|---|---|---|---|---|---|---|",
         ]
-        for col in display_cols:
-            fmt     = f"`{col.format_string}`" if col.format_string else "-"
-            summ    = col.summarize_by or "-"
-            src_col = f"`{col.source_column}`" if col.source_column else "-"
-            sort_by = f"`{col.sort_by_column}`" if col.sort_by_column else "-"
-            desc    = col.description or "-"
-            hidden  = "Hidden" if col.is_hidden else ""
-            lines.append(
-                _md_row(f"`{col.name}`", _dtype(col.data_type), fmt, summ, src_col, sort_by, desc, hidden)
-            )
+        lines += _md_table_rows(_column_rows(display_cols))
         lines.append("")
 
         key_cols = [c.name for c in display_cols if c.is_key]
@@ -478,9 +856,7 @@ def _table_detail_block(
 
     if table.calculation_items:
         lines += ["**Calculation Items**", "", "| Item | Ordinal | Format String |", "|---|---|---|"]
-        for item in table.calculation_items:
-            fmt = f"`{item.format_string_expression}`" if item.format_string_expression else "-"
-            lines.append(_md_row(f"`{item.name}`", item.ordinal, fmt))
+        lines += _md_table_rows(_calc_item_rows(table.calculation_items))
         lines.append("")
         lines += [
             "> Calculation items can be applied to any measure at report-build time "
@@ -500,11 +876,7 @@ def _table_detail_block(
 
     if display_measures:
         lines += ["**Measures**", "", "| Measure | Format | Description | Hidden |", "|---|---|---|---|"]
-        for m in display_measures:
-            fmt    = f"`{m.format_string}`" if m.format_string else "-"
-            desc   = m.description or "-"
-            hidden = "Hidden" if m.is_hidden else ""
-            lines.append(_md_row(f"`{m.name}`", fmt, desc, hidden))
+        lines += _md_table_rows(_table_measure_rows(display_measures))
         if include_dax:
             lines += ["", "**Measure DAX**", ""]
             for m in display_measures:
@@ -534,7 +906,7 @@ def _table_details_section(
     hidden_columns_map: dict | None = None,
     show_hidden: bool = True,
 ) -> str:
-    lines = ["## 2. Table Details", ""]
+    lines = [_md_heading("table_details"), ""]
     detail_support = [
         t for t in support_tables
         if t.table_type in ("calc_group", "calculated", "field_parameter")
@@ -553,85 +925,43 @@ def _table_details_section(
     return "\n".join(lines)
 
 
-def _column_format_string_inventory(tables: list[Table], heading: str = "Format Strings Used") -> str:
-    all_columns = [(t.name, c) for t in tables for c in t.columns]
-    if not all_columns:
+def _md_format_inventory(pairs: list, heading: str, items_header: str) -> str:
+    if not pairs:
         return ""
-
-    groups: dict[str, list[tuple[str, str]]] = {}
-    for table_name, c in all_columns:
-        key = c.format_string.strip() if c.format_string.strip() else "(none)"
-        groups.setdefault(key, []).append((c.name, table_name))
-
-    sorted_groups = sorted(groups.items(), key=lambda x: -len(x[1]))
-    total = len(all_columns)
-    unique = len(groups)
-
+    groups, total, unique = _format_groups(pairs)
     lines = [
         "",
         f"**{heading} ({total} total, {unique} unique)**",
         "",
-        "| Format String | Count | Columns |",
+        f"| Format String | Count | {items_header} |",
         "|---|---|---|",
+        *_md_table_rows(_format_rows(groups)),
+        "",
     ]
-    for fmt, items in sorted_groups:
-        items_str = ", ".join(f"`{name}` ({tbl})" for name, tbl in items)
-        fmt_cell = f"`{fmt}`" if fmt != "(none)" else "(none)"
-        lines.append(_md_row(fmt_cell, len(items), items_str))
-    lines.append("")
     return "\n".join(lines)
+
+
+def _column_format_string_inventory(tables: list[Table], heading: str = "Format Strings Used") -> str:
+    return _md_format_inventory(_column_format_pairs(tables), heading, "Columns")
 
 
 def _measure_format_string_inventory(measures: list) -> str:
-    if not measures:
-        return ""
-
-    groups: dict[str, list[tuple[str, str]]] = {}
-    for table_name, m in measures:
-        key = m.format_string.strip() if m.format_string.strip() else "(none)"
-        groups.setdefault(key, []).append((m.name, table_name))
-
-    sorted_groups = sorted(groups.items(), key=lambda x: -len(x[1]))
-    total = len(measures)
-    unique = len(groups)
-
-    lines = [
-        "",
-        f"**Format Strings Used ({total} total, {unique} unique)**",
-        "",
-        "| Format String | Count | Measures |",
-        "|---|---|---|",
-    ]
-    for fmt, items in sorted_groups:
-        items_str = ", ".join(f"`{name}` ({tbl})" for name, tbl in items)
-        fmt_cell = f"`{fmt}`" if fmt != "(none)" else "(none)"
-        lines.append(_md_row(fmt_cell, len(items), items_str))
-    lines.append("")
-    return "\n".join(lines)
+    return _md_format_inventory(_measure_format_pairs(measures), "Format Strings Used", "Measures")
 
 
 def _measures_section(measures: list, include_dax: bool) -> str:
-    all_measures = measures
-    lines = ["## 3. Measures", ""]
+    lines = [_md_heading("measures"), ""]
 
-    if not all_measures:
+    if not measures:
         lines += ["*No measures defined in this model.*", "", "---", ""]
         return "\n".join(lines)
 
-    folders: dict[str, list[tuple]] = {}
-    for table_name, m in all_measures:
-        folder = m.display_folder or "General"
-        folders.setdefault(folder, []).append((table_name, m))
-
-    for folder in sorted(folders.keys()):
+    for folder, items in _measure_folders(measures):
         lines += [f"### {folder.replace(chr(92), chr(92) * 2)}", "", "| Measure | Table | Format | Description |", "|---|---|---|---|"]
-        for table_name, m in folders[folder]:
-            fmt  = f"`{m.format_string}`" if m.format_string else "-"
-            desc = m.description or "-"
-            lines.append(_md_row(f"`{m.name}`", f"`{table_name}`", fmt, desc))
+        lines += _md_table_rows(_folder_measure_rows(items))
         lines.append("")
         if include_dax:
-            for _, m in folders[folder]:
+            for _, m in items:
                 if not m.dax_expression.strip():
                     continue
                 lines += [f"**`{m.name}`**", "```dax", m.dax_expression, "```", ""]
@@ -655,21 +985,14 @@ def _build_function_usage_map(model: SemanticModel) -> dict:
 
 
 def _functions_section(model: SemanticModel, include_dax: bool) -> str:
-    lines = ["## 4. Functions", ""]
+    lines = [_md_heading("functions"), ""]
 
     if not model.functions:
         lines += ["*No user-defined functions defined.*", "", "---", ""]
         return "\n".join(lines)
 
-    usage_map = _build_function_usage_map(model)
     lines += ["| Function | Used By | Description |", "|---|---|---|"]
-    for fn in model.functions:
-        used_by = usage_map.get(fn.name)
-        used_cell = (
-            ", ".join(f"`{mname}` ({tbl})" for mname, tbl in used_by) if used_by else "-"
-        )
-        desc = fn.description or "-"
-        lines.append(_md_row(f"`{fn.name}`", used_cell, desc))
+    lines += _md_table_rows(_function_rows(model))
     lines.append("")
     if include_dax:
         for fn in model.functions:
@@ -682,12 +1005,9 @@ def _functions_section(model: SemanticModel, include_dax: bool) -> str:
 
 
 def _relationships_section(model: SemanticModel) -> str:
-    lines = ["## 5. Relationships", ""]
+    lines = [_md_heading("relationships"), ""]
 
-    visible = [
-        r for r in model.relationships
-        if not _is_auto_date_table(r.from_table) and not _is_auto_date_table(r.to_table)
-    ]
+    visible = _visible_relationships(model)
 
     if not visible:
         lines += ["*No relationships defined in this model.*", "", "---", ""]
@@ -701,10 +1021,7 @@ def _relationships_section(model: SemanticModel) -> str:
             "| From Table | From Column | To Table | To Column | Cardinality | Cross Filter | Security Filter |",
             "|---|---|---|---|---|---|---|",
         ]
-        for r in active:
-            lines.append(
-                _md_row(f"`{r.from_table}`", f"`{r.from_column}`", f"`{r.to_table}`", f"`{r.to_column}`", r.cardinality or "-", r.cross_filtering_behavior, r.security_filtering_behavior)
-            )
+        lines += _md_table_rows(_relationship_rows(active, with_cardinality=True))
         lines.append("")
 
     if inactive:
@@ -713,10 +1030,7 @@ def _relationships_section(model: SemanticModel) -> str:
             "| From Table | From Column | To Table | To Column | Cross Filter | Security Filter |",
             "|---|---|---|---|---|---|",
         ]
-        for r in inactive:
-            lines.append(
-                _md_row(f"`{r.from_table}`", f"`{r.from_column}`", f"`{r.to_table}`", f"`{r.to_column}`", r.cross_filtering_behavior, r.security_filtering_behavior)
-            )
+        lines += _md_table_rows(_relationship_rows(inactive, with_cardinality=False))
         lines.append("")
 
     lines += ["---", ""]
@@ -896,41 +1210,28 @@ def _hidden_reference_note(refs: list[tuple[str, str]]) -> str:
 
 
 def _security_roles_section(model: SemanticModel) -> str:
-    lines = ["## 6. Security Roles", ""]
+    lines = [_md_heading("security_roles"), ""]
 
     if not model.security_roles:
         lines += ["*No security roles defined.*", "", "---", ""]
         return "\n".join(lines)
 
     lines += ["| Role | Table | Filter | Dynamic |", "|---|---|---|---|"]
-    for role in model.security_roles:
-        if not role.table_filters:
-            dynamic_label = f"Yes ({role.dynamic_function})" if role.is_dynamic else "No"
-            lines.append(_md_row(f"`{role.name}`", "-", "-", dynamic_label))
-        else:
-            for i, tf in enumerate(role.table_filters):
-                role_cell     = f"`{role.name}`" if i == 0 else ""
-                dynamic_label = (f"Yes ({role.dynamic_function})" if role.is_dynamic else "No") if i == 0 else ""
-                lines.append(_md_row(role_cell, f"`{tf.table}`", f"`{tf.dax_filter}`", dynamic_label))
+    lines += _md_table_rows(_role_rows(model))
 
     lines += ["", "---", ""]
     return "\n".join(lines)
 
 
 def _m_parameters_section(model: SemanticModel) -> str:
-    lines = ["## 7. M Parameters", ""]
+    lines = [_md_heading("m_parameters"), ""]
 
     if not model.m_parameters:
         lines += ["*No M parameters defined.*", "", "---", ""]
         return "\n".join(lines)
 
-    usage_map = _build_param_usage_map(model)
     lines += ["| Parameter | Type | Value | Used By |", "|---|---|---|---|"]
-    for p in model.m_parameters:
-        used_by   = usage_map.get(p.name, [])
-        used_cell = ", ".join(f"`{e}`" for e in used_by) if used_by else "-"
-        val_cell  = f"`{p.value}`" if p.value.strip() else "-"
-        lines.append(_md_row(f"`{p.name}`", p.param_type, val_cell, used_cell))
+    lines += _md_table_rows(_parameter_rows(model, dash_blank_value=True))
 
     lines += [
         "",
@@ -944,11 +1245,11 @@ def _m_parameters_section(model: SemanticModel) -> str:
 
 
 def _unresolved_section(resolved: dict[str, ResolvedSource]) -> str:
-    unresolved = [rs for rs in resolved.values() if rs.unresolved]
-    if not unresolved:
+    rows = _unresolved_rows(resolved)
+    if not rows:
         return ""
     lines = [
-        "## ⚠ Unresolved Sources",
+        _md_heading("unresolved"),
         "",
         "The following sources could not be resolved statically.",
         "Use tmdl-lens to provide a manual label for each.",
@@ -956,8 +1257,7 @@ def _unresolved_section(resolved: dict[str, ResolvedSource]) -> str:
         "| Expression | Reason |",
         "|---|---|",
     ]
-    for rs in unresolved:
-        lines.append(_md_row(f"`{rs.expression_name}`", rs.unresolved_reason))
+    lines += _md_table_rows(rows)
     lines += ["", "---", ""]
     return "\n".join(lines)
 
@@ -969,35 +1269,12 @@ def _statistics_section(
     staging_tables: list[Table],
     hidden_tables: list[Table],
 ) -> str:
-    calc      = [t for t in support_tables if t.table_type == "calculated"]
-    fp        = [t for t in support_tables if t.table_type == "field_parameter"]
-    mo        = [t for t in support_tables if t.table_type == "measures_only"]
-    cg        = [t for t in support_tables if t.table_type == "calc_group"]
-    all_meas  = [m for t in model.tables for m in t.measures]
-    calc_cols = [c for t in model.tables for c in t.columns if c.is_calculated]
-    visible_rels = [
-        r for r in model.relationships
-        if not _is_auto_date_table(r.from_table) and not _is_auto_date_table(r.to_table)
-    ]
-
-    def names(lst):
-        return ", ".join(f"`{t.name}`" for t in lst) if lst else "-"
-
     lines = [
-        "## 8. Model Statistics",
+        _md_heading("statistics"),
         "",
         "| Category | Count | Items |",
         "|---|---|---|",
-        _md_row("Loaded Tables", len(loaded_tables), names(loaded_tables)),
-        _md_row("Hidden Tables", len(hidden_tables), names(hidden_tables)),
-        _md_row("Calculated Tables", len(calc), names(calc)),
-        _md_row("Field Parameters", len(fp), names(fp)),
-        _md_row("Measures-Only Tables", len(mo), names(mo)),
-        _md_row("Calculation Groups", len(cg), names(cg)),
-        _md_row("Not Loaded", len(staging_tables), names(staging_tables)),
-        _md_row("Relationships", len(visible_rels), "-"),
-        _md_row("Measures", len(all_meas), "-"),
-        _md_row("Calculated Columns", len(calc_cols), "-"),
+        *_md_table_rows(_statistics_rows(model, loaded_tables, support_tables, staging_tables, hidden_tables)),
         "",
         "---",
         "",
@@ -1044,6 +1321,9 @@ pre code { background: none; color: inherit; padding: 0; }
 .footer { margin-top: 40px; font-size: 12px; color: #9aa3b8;
           border-top: 1px solid #e2e6f0; padding-top: 12px; }
 .empty { color: #9aa3b8; font-style: italic; font-size: 13px; }
+.toc { margin-bottom: 24px; }
+.toc-title { font-size: 12px; font-weight: 600; color: #7b8499; text-transform: uppercase; margin-bottom: 4px; }
+.toc ul { list-style: none; columns: 2; font-size: 13px; }
 """
 
 
@@ -1082,31 +1362,6 @@ def _html_table(headers: list[str], rows: list[list[str]], css_class: str = "") 
     return f"<table{cls}><thead><tr>{th_cells}</tr></thead><tbody>{body_rows}</tbody></table>"
 
 
-def _html_fmt_inventory_table(
-    title: str,
-    groups: list[tuple[str, list[tuple[str, str]]]],
-    total: int,
-    unique: int,
-    col_header: str,
-) -> str:
-    """Render a format string inventory as an HTML table."""
-    parts = [
-        f"<h4>{_esc(title)} ({total} total, {unique} unique)</h4>",
-        _html_table(
-            ["Format String", "Count", col_header],
-            [
-                (
-                    _RawHtml(f"<code>{_esc(fmt)}</code>") if fmt != "(none)" else "(none)",
-                    str(len(items)),
-                    _RawHtml(", ".join(f"<code>{_esc(name)}</code> ({_esc(tbl)})" for name, tbl in items)),
-                )
-                for fmt, items in groups
-            ],
-        ),
-    ]
-    return "\n".join(parts)
-
-
 def _code(text: str) -> _RawHtml:
     return _RawHtml(f"<code>{_esc(text)}</code>")
 
@@ -1117,6 +1372,295 @@ def _pre(text: str) -> _RawHtml:
 
 def _md_value_html(value: str) -> _RawHtml:
     return _RawHtml(re.sub(r"`([^`]*)`", r"<code>\1</code>", _esc(value)))
+
+
+def _html_cell(cell):
+    if isinstance(cell, _Code):
+        return _RawHtml(_code(cell.text) + _esc(cell.suffix))
+    if isinstance(cell, _CodeList):
+        return _RawHtml(", ".join(_code(n) for n in cell.names)) if cell.names else "-"
+    if isinstance(cell, _CodeRefs):
+        if not cell.pairs:
+            return "-"
+        return _RawHtml(", ".join(f"{_code(c)} ({_esc(p)})" for c, p in cell.pairs))
+    return cell
+
+
+def _html_rows(rows: list) -> list[list]:
+    return [[_html_cell(cell) for cell in row] for row in rows]
+
+
+def _html_title(key: str) -> str:
+    if key == "unresolved":
+        return f"&#9888; {_esc(_SECTION_TITLE[key])}"
+    return _esc(_SECTION_TITLE[key])
+
+
+def _html_heading(key: str) -> str:
+    return f'<h2 id="{_section_anchor(key)}">{_html_title(key)}</h2>'
+
+
+def _html_contents(resolved: dict[str, ResolvedSource]) -> str:
+    items = "".join(
+        f'<li><a href="#{_section_anchor(key)}">{_html_title(key)}</a></li>'
+        for key, _ in _rendered_sections(resolved)
+    )
+    return f'<nav class="toc"><p class="toc-title">Contents</p><ul>{items}</ul></nav>'
+
+
+def _html_fmt_inventory_table(title: str, pairs: list, col_header: str) -> str:
+    """Render a format string inventory as an HTML table."""
+    groups, total, unique = _format_groups(pairs)
+    parts = [
+        f"<h4>{_esc(title)} ({total} total, {unique} unique)</h4>",
+        _html_table(["Format String", "Count", col_header], _html_rows(_format_rows(groups))),
+    ]
+    return "\n".join(parts)
+
+
+@dataclass
+class _HtmlContext:
+    model: SemanticModel
+    resolved: dict
+    config: dict
+    include_dax: bool
+    show_hidden: bool
+    collected: dict
+    refs: tuple
+
+
+def _html_hidden_note(dax_expression: str, refs: tuple) -> list[str]:
+    found = _find_hidden_references(dax_expression, *refs)
+    if not found:
+        return []
+    parts = [f"{_code(display)} (in {_code(tbl)})" for display, tbl in found]
+    return [f"<p>⚠ References hidden: {', '.join(parts)}</p>"]
+
+
+def _html_overview(ctx: _HtmlContext) -> list[str]:
+    return [
+        _html_heading("overview"),
+        _html_table(["Property", "Value"], _html_rows(_overview_rows(ctx.config, ctx.model)), "overview-table"),
+    ]
+
+
+def _html_data_sources(ctx: _HtmlContext) -> list[str]:
+    loaded = ctx.collected["loaded"]
+    support = ctx.collected["support"]
+    staging = ctx.collected["staging"]
+    body = [
+        _html_heading("data_sources"),
+        f'<p>{_esc(_model_summary(loaded, staging, support, ctx.model))}</p>',
+    ]
+    if loaded:
+        body.append(_html_table(["Table", "Source Type", "Source"],
+                                _html_rows(_source_rows(loaded, ctx.resolved, mark_hidden=True))))
+    if support:
+        body.append('<h3>Support Tables</h3>')
+        body.append(_html_table(["Table", "Type"], _html_rows(_support_rows(support))))
+    body.append('<h3>Not Loaded</h3>')
+    if staging:
+        body.append(_html_table(["Table", "Source Type", "Source"],
+                                _html_rows(_source_rows(staging, ctx.resolved, mark_hidden=False))))
+        staging_pairs = _column_format_pairs(staging)
+        if staging_pairs:
+            body.append(_html_fmt_inventory_table("Not Loaded Column Format Strings", staging_pairs, "Columns"))
+    else:
+        body.append('<p class="empty">None.</p>')
+    return body
+
+
+def _html_table_details(ctx: _HtmlContext) -> list[str]:
+    body = [_html_heading("table_details")]
+    detail_support = [
+        t for t in ctx.collected["support"]
+        if t.table_type in ("calc_group", "calculated", "field_parameter")
+    ]
+    if ctx.show_hidden:
+        table_detail_tables = ctx.collected["loaded"] + detail_support
+    else:
+        table_detail_tables = ctx.collected["loaded_visible"] + detail_support
+    for t in table_detail_tables:
+        body.append(f'<h3>{_code(t.name)}</h3>')
+        rs = get_table_source(t, ctx.resolved)
+        if rs:
+            for label, value in _source_detail_fields(rs):
+                body.append(f'<p><strong>{_esc(label)}:</strong> {_md_value_html(value)}</p>')
+        elif t.table_type == "calculated":
+            body.append('<p><strong>Source:</strong> Calculated (DAX)</p>')
+            if ctx.include_dax and t.dax_partition:
+                body.append(_pre(t.dax_partition))
+        elif t.table_type == "field_parameter":
+            body.append('<p><strong>Source:</strong> Field Parameter</p>')
+        elif t.table_type == "measures_only":
+            body.append('<p><strong>Source:</strong> Measures only - no data source</p>')
+        if t.is_hidden:
+            body.append('<p><strong>Hidden:</strong> Yes</p>')
+        if ctx.show_hidden:
+            display_cols = [c for c in t.columns if not c.is_calculated]
+        else:
+            display_cols = [c for c in t.columns if not c.is_calculated and not c.is_hidden]
+        if display_cols:
+            body.append('<h4>Columns</h4>')
+            body.append(_html_table(
+                ["Column", "Type", "Format", "Summarize By", "Source Column", "Sort By", "Description", "Hidden"],
+                _html_rows(_column_rows(display_cols))))
+            key_cols = [c.name for c in display_cols if c.is_key]
+            if key_cols:
+                body.append('<p><strong>Key Column:</strong> '
+                            + ", ".join(_code(k) for k in key_cols) + '</p>')
+            cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
+            if cat_cols:
+                body.append('<p><strong>Data Categories:</strong> '
+                            + ", ".join(f"{_code(n)} = {_esc(cat)}" for n, cat in cat_cols)
+                            + '</p>')
+        calc_cols = [c for c in t.columns if c.is_calculated]
+        if calc_cols:
+            body.append('<h4>Calculated Columns</h4>')
+            for col in calc_cols:
+                if ctx.include_dax and col.dax_expression:
+                    body.append(f'<p><strong>{_code(col.name)}</strong></p>')
+                    body.append(_pre(col.dax_expression))
+                    body += _html_hidden_note(col.dax_expression, ctx.refs)
+        if t.calculation_items:
+            body.append('<h4>Calculation Items</h4>')
+            body.append(_html_table(["Item", "Ordinal", "Format String"],
+                                    _html_rows(_calc_item_rows(t.calculation_items))))
+            body.append('<p class="section-note">Calculation items can be applied to any measure at report-build time (via <code>SELECTEDMEASURE()</code>). TMDL has no static record of which measures a given item is actually used with.</p>')
+            if ctx.include_dax:
+                for item in t.calculation_items:
+                    body.append(f'<h4>{_code(item.name)}</h4>')
+                    body.append(_pre(item.dax_expression))
+        if ctx.show_hidden:
+            display_measures = t.measures[:]
+        else:
+            display_measures = [m for m in t.measures if not m.is_hidden]
+        if display_measures:
+            body.append('<h4>Measures</h4>')
+            body.append(_html_table(["Measure", "Format", "Description", "Hidden"],
+                                    _html_rows(_table_measure_rows(display_measures))))
+            if ctx.include_dax:
+                for m in display_measures:
+                    if not m.dax_expression.strip():
+                        continue
+                    body.append(f'<h4>{_code(m.name)}</h4>')
+                    body.append(_pre(m.dax_expression))
+                    body += _html_hidden_note(m.dax_expression, ctx.refs)
+    return body
+
+
+def _html_measures(ctx: _HtmlContext) -> list[str]:
+    all_measures = ctx.collected["measures"]
+    body = [_html_heading("measures")]
+    if not all_measures:
+        body.append('<p class="empty">No measures defined in this model.</p>')
+    else:
+        for folder, items in _measure_folders(all_measures):
+            body.append(f'<h3>{_esc(folder)}</h3>')
+            body.append(_html_table(["Measure", "Table", "Format", "Description"],
+                                    _html_rows(_folder_measure_rows(items))))
+            if ctx.include_dax:
+                for _, m in items:
+                    if not m.dax_expression.strip():
+                        continue
+                    body.append(f'<h4>{_code(m.name)}</h4>')
+                    body.append(_pre(m.dax_expression))
+        body.append(_html_fmt_inventory_table(
+            "Measure Format Strings", _measure_format_pairs(all_measures), "Measures"
+        ))
+    column_pairs = _column_format_pairs(ctx.collected["loaded"] + ctx.collected["support"])
+    if column_pairs:
+        body.append(_html_fmt_inventory_table("Column Format Strings", column_pairs, "Columns"))
+    return body
+
+
+def _html_functions(ctx: _HtmlContext) -> list[str]:
+    body = [_html_heading("functions")]
+    if not ctx.model.functions:
+        body.append('<p class="empty">No user-defined functions defined.</p>')
+        return body
+    body.append(_html_table(["Function", "Used By", "Description"], _html_rows(_function_rows(ctx.model))))
+    if ctx.include_dax:
+        for fn in ctx.model.functions:
+            if not fn.expression.strip():
+                continue
+            body.append(f'<h4>{_code(fn.name)}</h4>')
+            body.append(_pre(fn.expression))
+    return body
+
+
+def _html_relationships(ctx: _HtmlContext) -> list[str]:
+    body = [_html_heading("relationships")]
+    visible_rels = _visible_relationships(ctx.model)
+    if not visible_rels:
+        body.append('<p class="empty">No relationships defined in this model.</p>')
+        return body
+    active   = [r for r in visible_rels if r.is_active]
+    inactive = [r for r in visible_rels if not r.is_active]
+    if active:
+        body.append(_html_table(
+            ["From Table", "From Column", "To Table", "To Column", "Cardinality", "Cross Filter", "Security Filter"],
+            _html_rows(_relationship_rows(active, with_cardinality=True))))
+    if inactive:
+        body.append('<h3>Inactive Relationships</h3>')
+        body.append(_html_table(
+            ["From Table", "From Column", "To Table", "To Column", "Cross Filter", "Security Filter"],
+            _html_rows(_relationship_rows(inactive, with_cardinality=False))))
+    return body
+
+
+def _html_security_roles(ctx: _HtmlContext) -> list[str]:
+    body = [_html_heading("security_roles")]
+    if not ctx.model.security_roles:
+        body.append('<p class="empty">No security roles defined.</p>')
+        return body
+    body.append(_html_table(["Role", "Table", "Filter", "Dynamic"], _html_rows(_role_rows(ctx.model))))
+    return body
+
+
+def _html_m_parameters(ctx: _HtmlContext) -> list[str]:
+    body = [_html_heading("m_parameters")]
+    if not ctx.model.m_parameters:
+        body.append('<p class="empty">No M parameters defined.</p>')
+        return body
+    body.append(_html_table(["Parameter", "Type", "Value", "Used By"],
+                            _html_rows(_parameter_rows(ctx.model, dash_blank_value=False))))
+    body.append('<p class="section-note">Only direct parameter references in connector calls are shown.</p>')
+    return body
+
+
+def _html_unresolved(ctx: _HtmlContext) -> list[str]:
+    rows = _unresolved_rows(ctx.resolved)
+    if not rows:
+        return []
+    return [
+        _html_heading("unresolved"),
+        '<p>The following sources could not be resolved statically.</p>',
+        _html_table(["Expression", "Reason"], _html_rows(rows)),
+    ]
+
+
+def _html_statistics(ctx: _HtmlContext) -> list[str]:
+    c = ctx.collected
+    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    return [
+        _html_heading("statistics"),
+        _html_table(["Category", "Count", "Items"], _html_rows(rows)),
+    ]
+
+
+_HTML_SECTION_RENDERERS = {
+    "overview":       _html_overview,
+    "data_sources":   _html_data_sources,
+    "table_details":  _html_table_details,
+    "measures":       _html_measures,
+    "functions":      _html_functions,
+    "relationships":  _html_relationships,
+    "security_roles": _html_security_roles,
+    "m_parameters":   _html_m_parameters,
+    "unresolved":     _html_unresolved,
+    "statistics":     _html_statistics,
+}
 
 
 def generate_html(
@@ -1130,329 +1674,22 @@ def generate_html(
 
     collected = _collect(model, show_hidden)
     model = collected["model"]
-    loaded = collected["loaded"]
-    support = collected["support"]
-    staging = collected["staging"]
-    loaded_visible = collected["loaded_visible"]
-    hidden_tables = collected["hidden_tables"]
-    all_measures = collected["measures"]
-
-    ref_tables, ref_measures, ref_columns = _build_hidden_reference_map(model)
+    ctx = _HtmlContext(
+        model=model,
+        resolved=resolved,
+        config=config,
+        include_dax=include_dax,
+        show_hidden=show_hidden,
+        collected=collected,
+        refs=_build_hidden_reference_map(model),
+    )
 
     body = [f'<div class="container">',
             f'<h1>{_esc(report_name)}</h1>',
-            '<div class="subtitle">Generated by tmdl-lens</div>']
-
-    overview_rows = []
-    if config.get("owner"):
-        overview_rows.append(["Owner", _esc(config["owner"])])
-    if config.get("team"):
-        overview_rows.append(["Team", _esc(config["team"])])
-    if config.get("refresh_schedule"):
-        overview_rows.append(["Refresh Schedule", _esc(config["refresh_schedule"])])
-    overview_rows.extend([
-        ["Culture",             _esc(model.model_culture or "-")],
-        ["Compatibility Level", _esc(model.database_compatibility_level or "-")],
-        ["Data Source Version", _esc(model.model_data_source_version or "-")],
-    ])
-    body.append('<h2>Overview</h2>')
-    body.append(_html_table(["Property", "Value"], overview_rows, "overview-table"))
-
-    body.append('<h2>1. Data Sources</h2>')
-    body.append(f'<p>{_esc(_model_summary(loaded, staging, support, model))}</p>')
-    if loaded:
-        rows = []
-        for t in loaded:
-            rs = get_table_source(t, resolved)
-            src_type = _connector_type_label(rs) if rs else "-"
-            label    = _source_label(rs) if rs else "-"
-            name_cell = _RawHtml(f"{_code(t.name)} (hidden)") if t.is_hidden else _code(t.name)
-            rows.append([name_cell, _esc(src_type), _esc(label)])
-        body.append(_html_table(["Table", "Source Type", "Source"], rows))
-    if support:
-        body.append('<h3>Support Tables</h3>')
-        body.append(_html_table(["Table", "Type"],
-            [[_code(t.name), _esc(_table_type_label(t.table_type))] for t in support]))
-    body.append('<h3>Not Loaded</h3>')
-    if staging:
-        rows = []
-        for t in staging:
-            rs = get_table_source(t, resolved)
-            src_type = _connector_type_label(rs) if rs else "-"
-            label    = _source_label(rs) if rs else "-"
-            rows.append([_code(t.name), _esc(src_type), _esc(label)])
-        body.append(_html_table(["Table", "Source Type", "Source"], rows))
-        # Staging column format string inventory (HTML)
-        staging_col_groups: dict[str, list[tuple[str, str]]] = {}
-        for t in staging:
-            for c in t.columns:
-                key = c.format_string.strip() if c.format_string.strip() else "(none)"
-                staging_col_groups.setdefault(key, []).append((c.name, t.name))
-        if staging_col_groups:
-            staging_col_sorted = sorted(staging_col_groups.items(), key=lambda x: -len(x[1]))
-            staging_col_total = sum(len(v) for v in staging_col_groups.values())
-            staging_col_unique = len(staging_col_groups)
-            body.append(_html_fmt_inventory_table(
-                "Not Loaded Column Format Strings", staging_col_sorted, staging_col_total, staging_col_unique, "Columns"
-            ))
-    else:
-        body.append('<p class="empty">None.</p>')
-
-    body.append('<h2>2. Table Details</h2>')
-    detail_support = [
-        t for t in support
-        if t.table_type in ("calc_group", "calculated", "field_parameter")
-    ]
-    if show_hidden:
-        table_detail_tables = loaded + detail_support
-    else:
-        table_detail_tables = loaded_visible + detail_support
-    for t in table_detail_tables:
-        body.append(f'<h3>{_code(t.name)}</h3>')
-        rs = get_table_source(t, resolved)
-        if rs:
-            for label, value in _source_detail_fields(rs):
-                body.append(f'<p><strong>{_esc(label)}:</strong> {_md_value_html(value)}</p>')
-        elif t.table_type == "calculated":
-            body.append('<p><strong>Source:</strong> Calculated (DAX)</p>')
-            if include_dax and t.dax_partition:
-                body.append(_pre(t.dax_partition))
-        elif t.table_type == "field_parameter":
-            body.append('<p><strong>Source:</strong> Field Parameter</p>')
-        elif t.table_type == "measures_only":
-            body.append('<p><strong>Source:</strong> Measures only - no data source</p>')
-        if t.is_hidden:
-            body.append('<p><strong>Hidden:</strong> Yes</p>')
-        # Columns
-        if show_hidden:
-            display_cols = [c for c in t.columns if not c.is_calculated]
-        else:
-            display_cols = [c for c in t.columns if not c.is_calculated and not c.is_hidden]
-        if display_cols:
-            body.append('<h4>Columns</h4>')
-            body.append(_html_table(
-                ["Column", "Type", "Format", "Summarize By", "Source Column", "Sort By", "Description", "Hidden"],
-                [[_code(c.name),
-                  _esc(_dtype(c.data_type)),
-                  _code(c.format_string) if c.format_string else "-",
-                  _esc(c.summarize_by) if c.summarize_by else "-",
-                  _code(c.source_column) if c.source_column else "-",
-                  _code(c.sort_by_column) if c.sort_by_column else "-",
-                  _esc(c.description) if c.description else "-",
-                  _esc("Hidden" if c.is_hidden else "")]
-                 for c in display_cols]))
-            key_cols = [c.name for c in display_cols if c.is_key]
-            if key_cols:
-                body.append('<p><strong>Key Column:</strong> '
-                            + ", ".join(_code(k) for k in key_cols) + '</p>')
-            cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
-            if cat_cols:
-                body.append('<p><strong>Data Categories:</strong> '
-                            + ", ".join(f"{_code(n)} = {_esc(cat)}" for n, cat in cat_cols)
-                            + '</p>')
-        # Calculated columns
-        calc_cols = [c for c in t.columns if c.is_calculated]
-        if calc_cols:
-            body.append('<h4>Calculated Columns</h4>')
-            for col in calc_cols:
-                if include_dax and col.dax_expression:
-                    body.append(f'<p><strong>{_code(col.name)}</strong></p>')
-                    body.append(_pre(col.dax_expression))
-                    refs = _find_hidden_references(
-                        col.dax_expression, ref_tables, ref_measures, ref_columns
-                    )
-                    if refs:
-                        parts = [f"{_code(display)} (in {_code(tbl)})" for display, tbl in refs]
-                        body.append(f"<p>\u26a0 References hidden: {', '.join(parts)}</p>")
-        # Calculation items
-        if t.calculation_items:
-            body.append('<h4>Calculation Items</h4>')
-            rows = [[_code(i.name), str(i.ordinal),
-                     _code(i.format_string_expression) if i.format_string_expression else "-"]
-                    for i in t.calculation_items]
-            body.append(_html_table(["Item", "Ordinal", "Format String"], rows))
-            body.append('<p class="section-note">Calculation items can be applied to any measure at report-build time (via <code>SELECTEDMEASURE()</code>). TMDL has no static record of which measures a given item is actually used with.</p>')
-            if include_dax:
-                for item in t.calculation_items:
-                    body.append(f'<h4>{_code(item.name)}</h4>')
-                    body.append(_pre(item.dax_expression))
-        # Measures
-        if show_hidden:
-            display_measures = t.measures[:]
-        else:
-            display_measures = [m for m in t.measures if not m.is_hidden]
-        if display_measures:
-            body.append('<h4>Measures</h4>')
-            rows = [[_code(m.name),
-                     _code(m.format_string) if m.format_string else "-",
-                     _esc(m.description) if m.description else "-",
-                     _esc("Hidden" if m.is_hidden else "")]
-                    for m in display_measures]
-            body.append(_html_table(["Measure", "Format", "Description", "Hidden"], rows))
-            if include_dax:
-                for m in display_measures:
-                    if not m.dax_expression.strip():
-                        continue
-                    body.append(f'<h4>{_code(m.name)}</h4>')
-                    body.append(_pre(m.dax_expression))
-                    refs = _find_hidden_references(
-                        m.dax_expression, ref_tables, ref_measures, ref_columns
-                    )
-                    if refs:
-                        parts = [f"{_code(display)} (in {_code(tbl)})" for display, tbl in refs]
-                        body.append(f"<p>\u26a0 References hidden: {', '.join(parts)}</p>")
-
-    body.append('<h2>3. Measures</h2>')
-    if not all_measures:
-        body.append('<p class="empty">No measures defined in this model.</p>')
-    else:
-        folders: dict[str, list] = {}
-        for table_name, m in all_measures:
-            folders.setdefault(m.display_folder or "General", []).append((table_name, m))
-        for folder in sorted(folders.keys()):
-            body.append(f'<h3>{_esc(folder)}</h3>')
-            rows = [[_code(m.name), _code(tn),
-                     _code(m.format_string) if m.format_string else "-",
-                     _esc(m.description) if m.description else "-"]
-                    for tn, m in folders[folder]]
-            body.append(_html_table(["Measure", "Table", "Format", "Description"], rows))
-            if include_dax:
-                for _, m in folders[folder]:
-                    if not m.dax_expression.strip():
-                        continue
-                    body.append(f'<h4>{_code(m.name)}</h4>')
-                    body.append(_pre(m.dax_expression))
-
-    # Measure format string inventory (HTML)
-    if all_measures:
-        meas_groups: dict[str, list[tuple[str, str]]] = {}
-        for tn, m in all_measures:
-            key = m.format_string.strip() if m.format_string.strip() else "(none)"
-            meas_groups.setdefault(key, []).append((m.name, tn))
-        if meas_groups:
-            meas_sorted = sorted(meas_groups.items(), key=lambda x: -len(x[1]))
-            meas_total = sum(len(v) for v in meas_groups.values())
-            meas_unique = len(meas_groups)
-            body.append(_html_fmt_inventory_table(
-                "Measure Format Strings", meas_sorted, meas_total, meas_unique, "Measures"
-            ))
-
-    # Column format string inventory (HTML)
-    col_groups: dict[str, list[tuple[str, str]]] = {}
-    for t in loaded + support:
-        for c in t.columns:
-            key = c.format_string.strip() if c.format_string.strip() else "(none)"
-            col_groups.setdefault(key, []).append((c.name, t.name))
-    if col_groups:
-        col_sorted = sorted(col_groups.items(), key=lambda x: -len(x[1]))
-        col_total = sum(len(v) for v in col_groups.values())
-        col_unique = len(col_groups)
-        body.append(_html_fmt_inventory_table(
-            "Column Format Strings", col_sorted, col_total, col_unique, "Columns"
-        ))
-
-    body.append('<h2>4. Functions</h2>')
-    if not model.functions:
-        body.append('<p class="empty">No user-defined functions defined.</p>')
-    else:
-        fn_usage = _build_function_usage_map(model)
-        fn_rows = []
-        for fn in model.functions:
-            used_by = fn_usage.get(fn.name)
-            used_cell = (
-                _RawHtml(", ".join(_code(mname) + " (" + _esc(tbl) + ")" for mname, tbl in used_by))
-                if used_by else "-"
-            )
-            fn_rows.append([_code(fn.name), used_cell, _esc(fn.description) if fn.description else "-"])
-        body.append(_html_table(["Function", "Used By", "Description"], fn_rows))
-        if include_dax:
-            for fn in model.functions:
-                if not fn.expression.strip():
-                    continue
-                body.append(f'<h4>{_code(fn.name)}</h4>')
-                body.append(_pre(fn.expression))
-
-    body.append('<h2>5. Relationships</h2>')
-    visible_rels = [
-        r for r in model.relationships
-        if not _is_auto_date_table(r.from_table) and not _is_auto_date_table(r.to_table)
-    ]
-    if not visible_rels:
-        body.append('<p class="empty">No relationships defined in this model.</p>')
-    else:
-        active   = [r for r in visible_rels if r.is_active]
-        inactive = [r for r in visible_rels if not r.is_active]
-        if active:
-            body.append(_html_table(
-                ["From Table", "From Column", "To Table", "To Column", "Cardinality", "Cross Filter", "Security Filter"],
-                [[_code(r.from_table), _code(r.from_column),
-                  _code(r.to_table),   _code(r.to_column), _esc(r.cardinality or "-"),
-                  _esc(r.cross_filtering_behavior), _esc(r.security_filtering_behavior)]
-                 for r in active]))
-        if inactive:
-            body.append('<h3>Inactive Relationships</h3>')
-            body.append(_html_table(
-                ["From Table", "From Column", "To Table", "To Column", "Cross Filter", "Security Filter"],
-                [[_code(r.from_table), _code(r.from_column),
-                  _code(r.to_table),   _code(r.to_column),
-                  _esc(r.cross_filtering_behavior), _esc(r.security_filtering_behavior)]
-                 for r in inactive]))
-
-    body.append('<h2>6. Security Roles</h2>')
-    if not model.security_roles:
-        body.append('<p class="empty">No security roles defined.</p>')
-    else:
-        rows = []
-        for role in model.security_roles:
-            if not role.table_filters:
-                dyn = _RawHtml(f"Yes ({_esc(role.dynamic_function)})") if role.is_dynamic else "No"
-                rows.append([_code(role.name), "-", "-", dyn])
-            else:
-                for i, tf in enumerate(role.table_filters):
-                    role_cell = _code(role.name) if i == 0 else ""
-                    dyn = (_RawHtml(f"Yes ({_esc(role.dynamic_function)})") if role.is_dynamic else "No") if i == 0 else ""
-                    rows.append([role_cell, _code(tf.table), _code(tf.dax_filter), dyn])
-        body.append(_html_table(["Role", "Table", "Filter", "Dynamic"], rows))
-
-    body.append('<h2>7. M Parameters</h2>')
-    if not model.m_parameters:
-        body.append('<p class="empty">No M parameters defined.</p>')
-    else:
-        usage_map = _build_param_usage_map(model)
-        rows = [[_code(p.name), _esc(p.param_type), _code(p.value),
-                 _RawHtml(", ".join(_code(e) for e in usage_map.get(p.name, []))) or "-"]
-                for p in model.m_parameters]
-        body.append(_html_table(["Parameter", "Type", "Value", "Used By"], rows))
-        body.append('<p class="section-note">Only direct parameter references in connector calls are shown.</p>')
-
-    unresolved = [rs for rs in resolved.values() if rs.unresolved]
-    if unresolved:
-        body.append('<h2>&#9888; Unresolved Sources</h2>')
-        body.append('<p>The following sources could not be resolved statically.</p>')
-        body.append(_html_table(["Expression", "Reason"],
-            [[_code(rs.expression_name), _esc(rs.unresolved_reason)] for rs in unresolved]))
-
-    body.append('<h2>8. Model Statistics</h2>')
-    calc      = [t for t in support if t.table_type == "calculated"]
-    fp        = [t for t in support if t.table_type == "field_parameter"]
-    mo        = [t for t in support if t.table_type == "measures_only"]
-    cg        = [t for t in support if t.table_type == "calc_group"]
-    all_meas  = [m for t in model.tables for m in t.measures]
-    calc_cols = [c for t in model.tables for c in t.columns if c.is_calculated]
-    def _names(lst): return _RawHtml(", ".join(_code(t.name) for t in lst)) if lst else "-"
-    body.append(_html_table(["Category", "Count", "Items"], [
-        ["Loaded Tables",        str(len(loaded_visible)),       _names(loaded_visible)],
-        ["Hidden Tables",        str(len(hidden_tables)),        _names(hidden_tables)],
-        ["Calculated Tables",    str(len(calc)),                 _names(calc)],
-        ["Field Parameters",     str(len(fp)),                   _names(fp)],
-        ["Measures-Only Tables", str(len(mo)),                   _names(mo)],
-        ["Calculation Groups",   str(len(cg)),                   _names(cg)],
-        ["Not Loaded",           str(len(staging)),              _names(staging)],
-        ["Relationships",        str(len(visible_rels)),         "-"],
-        ["Measures",             str(len(all_meas)),             "-"],
-        ["Calculated Columns",   str(len(calc_cols)),            "-"],
-    ]))
-
+            '<div class="subtitle">Generated by tmdl-lens</div>',
+            _html_contents(resolved)]
+    for key, _ in _rendered_sections(resolved):
+        body += _HTML_SECTION_RENDERERS[key](ctx)
     body.append('<div class="footer">Generated by tmdl-lens</div>')
     body.append('</div>')
 
@@ -1488,25 +1725,372 @@ def generate_readme(
     loaded_visible = collected["loaded_visible"]
 
     ref_tables, ref_measures, ref_columns = _build_hidden_reference_map(model)
+    lineage = _lineage_section(collected, resolved, model) if config.get("include_lineage", False) else ""
 
-    sections = [
-        f"# {report_name}\n",
-        _overview_section(config, model),
-        _data_sources_section(loaded, staging, support, resolved, model),
-        _table_details_section(loaded, support, resolved, include_dax, ref_tables, ref_measures, ref_columns, show_hidden),
-        _measures_section(collected["measures"], include_dax),
-        _functions_section(model, include_dax),
-        _relationships_section(model),
-        _security_roles_section(model),
-        _m_parameters_section(model),
-    ]
+    renderers = {
+        "overview":       lambda: _overview_section(config, model),
+        "data_sources":   lambda: _data_sources_section(loaded, staging, support, resolved, model, lineage),
+        "table_details":  lambda: _table_details_section(loaded, support, resolved, include_dax, ref_tables, ref_measures, ref_columns, show_hidden),
+        "measures":       lambda: _measures_section(collected["measures"], include_dax),
+        "functions":      lambda: _functions_section(model, include_dax),
+        "relationships":  lambda: _relationships_section(model),
+        "security_roles": lambda: _security_roles_section(model),
+        "m_parameters":   lambda: _m_parameters_section(model),
+        "unresolved":     lambda: _unresolved_section(resolved),
+        "statistics":     lambda: _statistics_section(model, loaded_visible, support, staging, collected["hidden_tables"]),
+    }
 
-    unresolved = _unresolved_section(resolved)
-    if unresolved:
-        sections.append(unresolved)
-
-    sections.append(_statistics_section(model, loaded_visible, support, staging, collected["hidden_tables"]))
+    sections = [f"# {report_name}\n", _md_contents(resolved)]
+    for key, _ in _rendered_sections(resolved):
+        sections.append(renderers[key]())
 
     sections.append("*Generated by tmdl-lens*\n")
 
     return "\n".join(sections)
+
+
+@dataclass
+class _TextContext:
+    model: SemanticModel
+    resolved: dict
+    config: dict
+    include_dax: bool
+    show_hidden: bool
+    collected: dict
+    refs: tuple
+
+
+def _text_flat(value) -> str:
+    return str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _text_plain(value: str) -> str:
+    return re.sub(r"`([^`]*)`", r"\1", str(value)).replace("⚠", "!")
+
+
+def _text_cell(cell) -> str:
+    if isinstance(cell, _Code):
+        return _text_flat(f"{cell.text}{cell.suffix}")
+    if isinstance(cell, _CodeList):
+        return _text_flat(", ".join(cell.names)) if cell.names else "-"
+    if isinstance(cell, _CodeRefs):
+        if not cell.pairs:
+            return "-"
+        return _text_flat(", ".join(f"{c} ({p})" for c, p in cell.pairs))
+    return _text_flat(cell)
+
+
+def _text_table(headers: list[str], rows: list) -> list[str]:
+    cells = [[_text_cell(cell) for cell in row] for row in rows]
+    widths = [max([len(h)] + [len(r[i]) for r in cells]) for i, h in enumerate(headers)]
+
+    def line(values):
+        return "  ".join(v.ljust(w) for v, w in zip(values, widths)).rstrip()
+
+    return [line(headers), line(["-" * w for w in widths]), *(line(r) for r in cells)]
+
+
+def _text_underlined(title: str, char: str) -> list[str]:
+    return [title, char * len(title)]
+
+
+def _text_heading(key: str) -> list[str]:
+    title = _SECTION_TITLE[key]
+    if key == "unresolved":
+        title = f"! {title}"
+    return _text_underlined(title, "-")
+
+
+def _text_dax(expression: str) -> list[str]:
+    return [("    " + line).rstrip() for line in expression.split("\n")]
+
+
+def _text_hidden_note(dax_expression: str, refs: tuple) -> list[list[str]]:
+    note = _hidden_reference_note(_find_hidden_references(dax_expression, *refs))
+    return [[_text_plain(note)]] if note else []
+
+
+def _text_inventory(pairs: list, heading: str, items_header: str) -> list[list[str]]:
+    if not pairs:
+        return []
+    groups, total, unique = _format_groups(pairs)
+    return [
+        [f"{heading} ({total} total, {unique} unique)"],
+        _text_table(["Format String", "Count", items_header], _format_rows(groups)),
+    ]
+
+
+def _text_overview(ctx: _TextContext) -> list[list[str]]:
+    return [
+        _text_heading("overview"),
+        _text_table(["Property", "Value"], _overview_rows(ctx.config, ctx.model)),
+    ]
+
+
+def _text_data_sources(ctx: _TextContext) -> list[list[str]]:
+    loaded = ctx.collected["loaded"]
+    support = ctx.collected["support"]
+    staging = ctx.collected["staging"]
+    paras = [
+        _text_heading("data_sources"),
+        [_model_summary(loaded, staging, support, ctx.model)],
+    ]
+    if loaded:
+        paras.append(_text_table(["Table", "Source Type", "Source"],
+                                 _source_rows(loaded, ctx.resolved, mark_hidden=True)))
+    else:
+        paras.append(["No loaded tables found."])
+    if support:
+        paras.append(_text_underlined("Support Tables", "~"))
+        paras.append(_text_table(["Table", "Type"], _support_rows(support)))
+    paras.append(_text_underlined("Not Loaded", "~"))
+    if staging:
+        paras.append([
+            "These tables have enableLoad = false and are not visible in the report.",
+            "They are typically used as intermediate query steps.",
+        ])
+        paras.append(_text_table(["Table", "Source Type", "Source"],
+                                 _source_rows(staging, ctx.resolved, mark_hidden=False)))
+        paras += _text_inventory(_column_format_pairs(staging), "Not Loaded Table Format Strings Used", "Columns")
+    else:
+        paras.append(["None."])
+    return paras
+
+
+def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
+    paras = [_text_underlined(table.name, "~")]
+    rs = get_table_source(table, ctx.resolved)
+    source_lines = []
+    dax_partition = ""
+    if rs:
+        source_lines = [f"{_text_plain(label)}: {_text_plain(value)}" for label, value in _source_detail_fields(rs)]
+    elif table.table_type == "calculated":
+        source_lines = ["Source: Calculated (DAX)"]
+        if ctx.include_dax and table.dax_partition:
+            dax_partition = table.dax_partition
+    elif table.table_type == "field_parameter":
+        source_lines = ["Source: Field Parameter"]
+    elif table.table_type == "measures_only":
+        source_lines = ["Source: Measures only - no data source"]
+    paras.append(source_lines)
+    if dax_partition:
+        paras.append(_text_dax(dax_partition))
+    flags = []
+    if not table.is_loaded:
+        flags.append("! Not loaded (enableLoad = false).")
+    if table.is_hidden:
+        flags.append("Hidden: Yes")
+    paras.append(flags)
+
+    all_cols = [c for c in table.columns if not c.is_calculated]
+    display_cols = all_cols if ctx.show_hidden else [c for c in all_cols if not c.is_hidden]
+    if display_cols:
+        paras.append(["Columns"])
+        paras.append(_text_table(
+            ["Column", "Type", "Format", "Summarize By", "Source Column", "Sort By", "Description", "Hidden"],
+            _column_rows(display_cols)))
+        extra = []
+        key_cols = [c.name for c in display_cols if c.is_key]
+        if key_cols:
+            extra.append("Key Column: " + ", ".join(key_cols))
+        cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
+        if cat_cols:
+            extra.append("Data Categories: " + ", ".join(f"{name} = {cat}" for name, cat in cat_cols))
+        paras.append(extra)
+
+    calc_cols = [c for c in table.columns if c.is_calculated]
+    if calc_cols:
+        paras.append(["Calculated Columns"])
+        for col in calc_cols:
+            paras.append([f"- {col.name}"])
+            if ctx.include_dax and col.dax_expression:
+                paras.append(_text_dax(col.dax_expression))
+                paras += _text_hidden_note(col.dax_expression, ctx.refs)
+
+    if table.calculation_items:
+        paras.append(["Calculation Items"])
+        paras.append(_text_table(["Item", "Ordinal", "Format String"], _calc_item_rows(table.calculation_items)))
+        paras.append([
+            "Calculation items can be applied to any measure at report-build time "
+            "(via SELECTEDMEASURE()). TMDL has no static record of which measures "
+            "a given item is actually used with."
+        ])
+        if ctx.include_dax:
+            paras.append(["Item DAX"])
+            for item in table.calculation_items:
+                paras.append([item.name])
+                paras.append(_text_dax(item.dax_expression))
+
+    display_measures = table.measures[:] if ctx.show_hidden else [m for m in table.measures if not m.is_hidden]
+    if display_measures:
+        paras.append(["Measures"])
+        paras.append(_text_table(["Measure", "Format", "Description", "Hidden"], _table_measure_rows(display_measures)))
+        if ctx.include_dax:
+            paras.append(["Measure DAX"])
+            for m in display_measures:
+                if not m.dax_expression.strip():
+                    continue
+                paras.append([m.name])
+                paras.append(_text_dax(m.dax_expression))
+                paras += _text_hidden_note(m.dax_expression, ctx.refs)
+    return paras
+
+
+def _text_table_details(ctx: _TextContext) -> list[list[str]]:
+    loaded = ctx.collected["loaded"]
+    support = ctx.collected["support"]
+    detail_support = [
+        t for t in support
+        if t.table_type in ("calc_group", "calculated", "field_parameter")
+    ]
+    if ctx.show_hidden:
+        tables = loaded + detail_support
+    else:
+        tables = ctx.collected["loaded_visible"] + detail_support
+    paras = [_text_heading("table_details")]
+    if not tables:
+        paras.append(["No loaded tables."])
+    for t in tables:
+        paras += _text_table_block(t, ctx)
+    paras += _text_inventory(_column_format_pairs(loaded + support), "Format Strings Used", "Columns")
+    return paras
+
+
+def _text_measures(ctx: _TextContext) -> list[list[str]]:
+    measures = ctx.collected["measures"]
+    paras = [_text_heading("measures")]
+    if not measures:
+        paras.append(["No measures defined in this model."])
+        return paras
+    for folder, items in _measure_folders(measures):
+        paras.append(_text_underlined(folder, "~"))
+        paras.append(_text_table(["Measure", "Table", "Format", "Description"], _folder_measure_rows(items)))
+        if ctx.include_dax:
+            for _, m in items:
+                if not m.dax_expression.strip():
+                    continue
+                paras.append([m.name])
+                paras.append(_text_dax(m.dax_expression))
+    paras += _text_inventory(_measure_format_pairs(measures), "Format Strings Used", "Measures")
+    return paras
+
+
+def _text_functions(ctx: _TextContext) -> list[list[str]]:
+    paras = [_text_heading("functions")]
+    if not ctx.model.functions:
+        paras.append(["No user-defined functions defined."])
+        return paras
+    paras.append(_text_table(["Function", "Used By", "Description"], _function_rows(ctx.model)))
+    if ctx.include_dax:
+        for fn in ctx.model.functions:
+            if not fn.expression.strip():
+                continue
+            paras.append([fn.name])
+            paras.append(_text_dax(fn.expression))
+    return paras
+
+
+def _text_relationships(ctx: _TextContext) -> list[list[str]]:
+    paras = [_text_heading("relationships")]
+    visible = _visible_relationships(ctx.model)
+    if not visible:
+        paras.append(["No relationships defined in this model."])
+        return paras
+    active = [r for r in visible if r.is_active]
+    inactive = [r for r in visible if not r.is_active]
+    if active:
+        paras.append(_text_table(
+            ["From Table", "From Column", "To Table", "To Column", "Cardinality", "Cross Filter", "Security Filter"],
+            _relationship_rows(active, with_cardinality=True)))
+    if inactive:
+        paras.append(_text_underlined("Inactive Relationships", "~"))
+        paras.append(_text_table(
+            ["From Table", "From Column", "To Table", "To Column", "Cross Filter", "Security Filter"],
+            _relationship_rows(inactive, with_cardinality=False)))
+    return paras
+
+
+def _text_security_roles(ctx: _TextContext) -> list[list[str]]:
+    paras = [_text_heading("security_roles")]
+    if not ctx.model.security_roles:
+        paras.append(["No security roles defined."])
+        return paras
+    paras.append(_text_table(["Role", "Table", "Filter", "Dynamic"], _role_rows(ctx.model)))
+    return paras
+
+
+def _text_m_parameters(ctx: _TextContext) -> list[list[str]]:
+    paras = [_text_heading("m_parameters")]
+    if not ctx.model.m_parameters:
+        paras.append(["No M parameters defined."])
+        return paras
+    paras.append(_text_table(["Parameter", "Type", "Value", "Used By"],
+                             _parameter_rows(ctx.model, dash_blank_value=True)))
+    paras.append([
+        "Only direct parameter references in connector calls are shown.",
+        "Parameters used in conditional logic or computed expressions may not appear here.",
+    ])
+    return paras
+
+
+def _text_unresolved(ctx: _TextContext) -> list[list[str]]:
+    rows = _unresolved_rows(ctx.resolved)
+    if not rows:
+        return []
+    return [
+        _text_heading("unresolved"),
+        [
+            "The following sources could not be resolved statically.",
+            "Use tmdl-lens to provide a manual label for each.",
+        ],
+        _text_table(["Expression", "Reason"], rows),
+    ]
+
+
+def _text_statistics(ctx: _TextContext) -> list[list[str]]:
+    c = ctx.collected
+    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    return [_text_heading("statistics"), _text_table(["Category", "Count", "Items"], rows)]
+
+
+_TEXT_SECTION_RENDERERS = {
+    "overview":       _text_overview,
+    "data_sources":   _text_data_sources,
+    "table_details":  _text_table_details,
+    "measures":       _text_measures,
+    "functions":      _text_functions,
+    "relationships":  _text_relationships,
+    "security_roles": _text_security_roles,
+    "m_parameters":   _text_m_parameters,
+    "unresolved":     _text_unresolved,
+    "statistics":     _text_statistics,
+}
+
+
+def generate_text(
+    model: SemanticModel,
+    resolved: dict[str, ResolvedSource],
+    config: dict,
+) -> str:
+    report_name = config.get("report_name", model.report_name)
+    include_dax = config.get("include_dax", True)
+    show_hidden = config.get("show_hidden", True)
+
+    collected = _collect(model, show_hidden)
+    model = collected["model"]
+    ctx = _TextContext(
+        model=model,
+        resolved=resolved,
+        config=config,
+        include_dax=include_dax,
+        show_hidden=show_hidden,
+        collected=collected,
+        refs=_build_hidden_reference_map(model),
+    )
+
+    paras = [_text_underlined(report_name, "=")]
+    for key, _ in _SECTIONS:
+        paras += _TEXT_SECTION_RENDERERS[key](ctx)
+    paras.append(["Generated by tmdl-lens"])
+    paras = [p for p in paras if any(p)]
+    return "\n\n".join("\n".join(p) for p in paras) + "\n"

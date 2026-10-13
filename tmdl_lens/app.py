@@ -17,7 +17,7 @@ import customtkinter as ctk
 # Ensure tmdl_lens/ is importable when running directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmdl_lens.config import load as load_config, save as save_config, validate_config
+from tmdl_lens.config import load_result, save as save_config, validate_config
 from tmdl_lens.pipeline import Pipeline, PipelineConfig, PipelineResult
 from tmdl_lens.version import __version__ as APP_VERSION
 
@@ -68,7 +68,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.config_data = load_config()
+        self._config_load = load_result()
+        self.config_data = self._config_load.config
         self._last_run: str = "never"
         self._run_thread: threading.Thread | None = None
         self._watcher: TmdlWatcher | None = None
@@ -252,7 +253,7 @@ class App(ctk.CTk):
         self._format_var = tk.StringVar(value="HTML")
         ctk.CTkOptionMenu(
             format_row,
-            values=["HTML", "MD"],
+            values=["HTML", "MD", "TXT", "JSON"],
             variable=self._format_var,
             width=80, height=28,
             fg_color=COLORS["bg"],
@@ -279,6 +280,15 @@ class App(ctk.CTk):
             "Include DAX expressions",
             "Append full DAX for each measure in the output",
             self._dax_var,
+        )
+        ctk.CTkFrame(frame, height=6, fg_color="transparent").pack(fill="x")
+
+        self._lineage_var = tk.BooleanVar(value=False)
+        self._toggle_row(
+            frame,
+            "Include lineage diagram",
+            "Add a Mermaid source-to-table diagram (Markdown output only)",
+            self._lineage_var,
         )
         ctk.CTkFrame(frame, height=6, fg_color="transparent").pack(fill="x")
 
@@ -443,6 +453,14 @@ class App(ctk.CTk):
             self.log('install with: pip install watchdog', "warn")
         elif not self.config_data.get("features", {}).get("watcher", True):
             self.log('file watcher disabled in config.json (features.watcher)', "warn")
+        self.log(f"config: {self._config_load.path}", "info")
+        if self._config_load.migrated_from:
+            self.log(f"config copied from {self._config_load.migrated_from}", "info")
+        if self._config_load.failed:
+            self.log(f"could not load config: {self._config_load.error}", "err")
+            self.log("config.json will not be overwritten until you press Save", "err")
+        for warning in self._config_load.warnings:
+            self.log(warning, "warn")
         for warning in validate_config(self.config_data):
             self.log(warning, "warn")
 
@@ -706,8 +724,10 @@ class App(ctk.CTk):
         self._reports_var.set(c.get("reports_folder", ""))
         self._output_var.set(c.get("output_folder", ""))
         self._overwrite_var.set(c.get("overwrite_readme", False))
-        self._format_var.set("MD" if c.get("output_format", "html") == "md" else "HTML")
+        output_format = c.get("output_format", "html")
+        self._format_var.set(output_format.upper() if output_format in ("html", "md", "txt", "json") else "HTML")
         self._dax_var.set(c.get("include_dax", True))
+        self._lineage_var.set(c.get("include_lineage", False))
         self._skip_var.set(c.get("skip_unchanged", True))
         self._watch_var.set(False)  # always off on startup - user enables manually
         self._debounce_var.set(f"{c.get('watch_debounce', 10)} sec")
@@ -728,6 +748,7 @@ class App(ctk.CTk):
             "overwrite_readme": self._overwrite_var.get(),
             "output_format":    self._format_var.get().lower(),
             "include_dax":      self._dax_var.get(),
+            "include_lineage":  self._lineage_var.get(),
             "skip_unchanged":   self._skip_var.get(),
             "watch_debounce":   debounce,
             "owner":            self._owner_var.get().strip(),
@@ -766,13 +787,17 @@ class App(ctk.CTk):
 
     # ── Action handlers ───────────────────────────────────────────────────────
 
+    def _write_config(self, config: dict) -> bool:
+        ok = save_config(config)
+        if not ok:
+            self.log(f"warning: settings could not be saved to {self._config_load.path}", "warn")
+        return ok
+
     def _on_save_config(self):
         self.config_data = self._collect_config()
-        ok = save_config(self.config_data)
-        if ok:
+        if self._write_config(self.config_data):
+            self._config_load.error = ""
             self.log("config saved", "ok")
-        else:
-            self.log("failed to save config", "err")
 
     def _on_clear_log(self):
         self._log_text.configure(state="normal")
@@ -870,6 +895,7 @@ class App(ctk.CTk):
             reports_folder=config["reports_folder"],
             output_folder=config.get("output_folder", ""),
             include_dax=config.get("include_dax", True),
+            include_lineage=config.get("include_lineage", False),
             output_format=config.get("output_format", "html"),
             overwrite=True,
             skip_unchanged=config.get("skip_unchanged", False),
@@ -886,7 +912,7 @@ class App(ctk.CTk):
 
         result = pipeline.run_single(pbip_path)
         if result.content_hash:
-            self.after(0, lambda h=result.content_hash, n=pbip_name: self._persist_hashes({n: h}))
+            self.after(0, lambda h=result.content_hash, k=result.hash_key: self._persist_hashes({k: h}))
         if result.success:
             now = datetime.now().strftime("%H:%M:%S")
             self.after(0, lambda: self._last_run_label.configure(
@@ -899,6 +925,7 @@ class App(ctk.CTk):
             reports_folder=config["reports_folder"],
             output_folder=config.get("output_folder", ""),
             include_dax=config.get("include_dax", True),
+            include_lineage=config.get("include_lineage", False),
             output_format=config.get("output_format", "html"),
             overwrite=config.get("overwrite_readme", False),
             skip_unchanged=config.get("skip_unchanged", False),
@@ -940,7 +967,9 @@ class App(ctk.CTk):
         if not new_hashes:
             return
         self.config_data.setdefault("file_hashes", {}).update(new_hashes)
-        save_config(self._collect_config())
+        if self._config_load.failed:
+            return
+        self._write_config(self._collect_config())
 
     # -- Log -------------------------------------------------------------------
 
@@ -960,9 +989,11 @@ class App(ctk.CTk):
     def _auto_save_config(self):
         """Write config.json on first launch only - don't overwrite an existing file."""
         from tmdl_lens.config import config_path
+        if self._config_load.failed:
+            return
         if not os.path.exists(config_path()):
             self.config_data = self._collect_config()
-            save_config(self.config_data)
+            self._write_config(self.config_data)
 
     def _center_window(self):
         self.update_idletasks()
@@ -977,7 +1008,8 @@ class App(ctk.CTk):
     def _on_close(self):
         """Auto-save config on close so settings persist without requiring manual Save."""
         self.config_data = self._collect_config()
-        save_config(self.config_data)
+        if not self._config_load.failed:
+            self._write_config(self.config_data)
         self._stop_watcher()
         self.destroy()
 

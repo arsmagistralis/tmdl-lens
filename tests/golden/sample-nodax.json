@@ -1,0 +1,1181 @@
+{
+  "schema_version": "1.0",
+  "report": {
+    "name": "tmdl-lens-test-report",
+    "owner": null,
+    "team": null,
+    "refresh_schedule": null
+  },
+  "model": {
+    "culture": "en-US",
+    "compatibility_level": 1605,
+    "data_source_version": "powerBI_V3"
+  },
+  "tables": [
+    {
+      "name": "_measures",
+      "kind": "measures_only",
+      "is_hidden": false,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "embedded",
+        "connector": null,
+        "details": {},
+        "physical_tables": [],
+        "chain": []
+      },
+      "expression": null,
+      "columns": [],
+      "measures": [
+        {
+          "name": "Avg Order Value",
+          "display_folder": null,
+          "format_string": "#,##0.00",
+          "description": null,
+          "is_hidden": false,
+          "expression": null
+        },
+        {
+          "name": "Order Count",
+          "display_folder": null,
+          "format_string": "#,##0",
+          "description": null,
+          "is_hidden": false,
+          "expression": null
+        },
+        {
+          "name": "Sales YTD",
+          "display_folder": null,
+          "format_string": "#,##0.00",
+          "description": null,
+          "is_hidden": true,
+          "expression": null
+        },
+        {
+          "name": "Total Sales Amount",
+          "display_folder": null,
+          "format_string": "#,##0.00",
+          "description": null,
+          "is_hidden": false,
+          "expression": null
+        }
+      ],
+      "calculation_items": []
+    },
+    {
+      "name": "cg-time-intelligence",
+      "kind": "calculation_group",
+      "is_hidden": false,
+      "description": null,
+      "source": null,
+      "expression": null,
+      "columns": [
+        {
+          "name": "Name",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": null,
+          "source_column": "Name",
+          "sort_by_column": "Ordinal",
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "Ordinal",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": null,
+          "source_column": "Ordinal",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": [
+        {
+          "name": "MTD",
+          "ordinal": 1,
+          "format_string_expression": "SELECTEDMEASUREFORMATSTRING()",
+          "expression": null
+        },
+        {
+          "name": "Prior Year",
+          "ordinal": 3,
+          "format_string_expression": "SELECTEDMEASUREFORMATSTRING()",
+          "expression": null
+        },
+        {
+          "name": "Rolling 12M",
+          "ordinal": 2,
+          "format_string_expression": "SELECTEDMEASUREFORMATSTRING()",
+          "expression": null
+        },
+        {
+          "name": "YTD",
+          "ordinal": 0,
+          "format_string_expression": "SELECTEDMEASUREFORMATSTRING()",
+          "expression": null
+        },
+        {
+          "name": "YoY %",
+          "ordinal": 4,
+          "format_string_expression": "0.00%",
+          "expression": null
+        }
+      ]
+    },
+    {
+      "name": "dim-date",
+      "kind": "calculated",
+      "is_hidden": false,
+      "description": null,
+      "source": null,
+      "expression": null,
+      "columns": [
+        {
+          "name": "Date",
+          "data_type": "dateTime",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": true,
+          "format_string": "Long Date",
+          "summarize_by": "none",
+          "source_column": "Date",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "IsWeekend",
+          "data_type": "calculated",
+          "is_calculated": true,
+          "is_hidden": true,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "MonthName",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "MonthName",
+          "sort_by_column": "MonthNumber",
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "MonthNumber",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "none",
+          "source_column": "MonthNumber",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "PriorYearFlag",
+          "data_type": "calculated",
+          "is_calculated": true,
+          "is_hidden": true,
+          "is_key": true,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "Year",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "none",
+          "source_column": "Year",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": []
+    },
+    {
+      "name": "dim-product",
+      "kind": "loaded",
+      "is_hidden": false,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "PowerPlatform",
+          "function": "Dataflows"
+        },
+        "details": {
+          "entity": "product_dim",
+          "workspace_id": "aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa",
+          "dataflow_id": "cccccccc-0000-0000-0000-cccccccccccc"
+        },
+        "physical_tables": [],
+        "chain": [
+          "source-dataflow-platform"
+        ]
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "category",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "category",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": "Product category grouping used for merchandising reports",
+          "expression": null
+        },
+        {
+          "name": "product_id",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "product_id",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": "Unique identifier for the product, sourced from the product dimension feed",
+          "expression": null
+        },
+        {
+          "name": "product_name",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "product_name",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "product_url",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "product_url",
+          "sort_by_column": null,
+          "data_category": "WebURL",
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "unit_price",
+          "data_type": "double",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "sum",
+          "source_column": "unit_price",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": []
+    },
+    {
+      "name": "fact-sales",
+      "kind": "loaded",
+      "is_hidden": false,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "PowerBI",
+          "function": "Dataflows"
+        },
+        "details": {
+          "entity": "sales_fact",
+          "workspace_id": "aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa",
+          "dataflow_id": "bbbbbbbb-0000-0000-0000-bbbbbbbbbbbb"
+        },
+        "physical_tables": [],
+        "chain": [
+          "source-dataflow-standard"
+        ]
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "amount",
+          "data_type": "double",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "sum",
+          "source_column": "amount",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "customer_id",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "customer_id",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "order_date",
+          "data_type": "dateTime",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "Long Date",
+          "summarize_by": "none",
+          "source_column": "order_date",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "order_id",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "none",
+          "source_column": "order_id",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "ship_date",
+          "data_type": "dateTime",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "Long Date",
+          "summarize_by": "none",
+          "source_column": "ship_date",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [
+        {
+          "name": "Order Fulfillment Summary",
+          "display_folder": null,
+          "format_string": "0",
+          "description": null,
+          "is_hidden": false,
+          "expression": null
+        },
+        {
+          "name": "_Row Count Helper",
+          "display_folder": null,
+          "format_string": "#,##0",
+          "description": null,
+          "is_hidden": true,
+          "expression": null
+        }
+      ],
+      "calculation_items": []
+    },
+    {
+      "name": "helper-order-lookup",
+      "kind": "loaded",
+      "is_hidden": true,
+      "description": "Internal lookup table joining order status codes to staging data. Not exposed to report consumers.",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "schema": "dbo",
+          "table": "orders"
+        },
+        "physical_tables": [
+          {
+            "schema": "dbo",
+            "table": "orders",
+            "via": "navigation"
+          }
+        ],
+        "chain": [
+          "source-sql-staging",
+          "source-sql-direct"
+        ]
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "order_id",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "none",
+          "source_column": "order_id",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "status_code",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "status",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [
+        {
+          "name": "Open Order Count",
+          "display_folder": null,
+          "format_string": "0",
+          "description": null,
+          "is_hidden": false,
+          "expression": null
+        }
+      ],
+      "calculation_items": []
+    },
+    {
+      "name": "param-metric-selector",
+      "kind": "field_parameter",
+      "is_hidden": false,
+      "description": null,
+      "source": null,
+      "expression": null,
+      "columns": [
+        {
+          "name": "param-metric-selector",
+          "data_type": "unknown",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "[Value1]",
+          "sort_by_column": "param-metric-selector Order",
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "param-metric-selector Fields",
+          "data_type": "unknown",
+          "is_calculated": false,
+          "is_hidden": true,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "[Value2]",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "param-metric-selector Order",
+          "data_type": "unknown",
+          "is_calculated": false,
+          "is_hidden": true,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "sum",
+          "source_column": "[Value3]",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": []
+    },
+    {
+      "name": "source-sql-staging",
+      "kind": "not_loaded",
+      "is_hidden": false,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "schema": "dbo",
+          "table": "orders"
+        },
+        "physical_tables": [
+          {
+            "schema": "dbo",
+            "table": "orders",
+            "via": "navigation"
+          }
+        ],
+        "chain": [
+          "source-sql-direct"
+        ]
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "internal_notes",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "internal_notes",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "order_id",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "0",
+          "summarize_by": "none",
+          "source_column": "order_id",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "status",
+          "data_type": "string",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": "status",
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": []
+    }
+  ],
+  "relationships": [
+    {
+      "from_table": "fact-sales",
+      "from_column": "customer_id",
+      "to_table": "dim-product",
+      "to_column": "product_id",
+      "is_active": true,
+      "cardinality": "many_to_one",
+      "cross_filter": "one_direction",
+      "security_filter": "one_direction"
+    },
+    {
+      "from_table": "fact-sales",
+      "from_column": "order_date",
+      "to_table": "dim-date",
+      "to_column": "Date",
+      "is_active": true,
+      "cardinality": "many_to_one",
+      "cross_filter": "both_directions",
+      "security_filter": "one_direction"
+    },
+    {
+      "from_table": "fact-sales",
+      "from_column": "ship_date",
+      "to_table": "dim-date",
+      "to_column": "Date",
+      "is_active": false,
+      "cardinality": "many_to_one",
+      "cross_filter": "one_direction",
+      "security_filter": "both_directions"
+    }
+  ],
+  "expressions": [
+    {
+      "name": "fnGetDataflowEntity",
+      "query_group": "Functions",
+      "source": {
+        "resolved": true,
+        "type": "function_def",
+        "connector": null,
+        "details": {},
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "helper-report-date",
+      "query_group": "Helpers",
+      "source": {
+        "resolved": true,
+        "type": "scalar_helper",
+        "connector": null,
+        "details": {},
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-csv-local",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Csv",
+          "function": "Document"
+        },
+        "details": {
+          "file": "C:\\Data\\locations.csv"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-dataflow-platform",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "PowerPlatform",
+          "function": "Dataflows"
+        },
+        "details": {
+          "entity": "product_dim",
+          "workspace_id": "aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa",
+          "dataflow_id": "cccccccc-0000-0000-0000-cccccccccccc"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-dataflow-standard",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "PowerBI",
+          "function": "Dataflows"
+        },
+        "details": {
+          "entity": "sales_fact",
+          "workspace_id": "aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa",
+          "dataflow_id": "bbbbbbbb-0000-0000-0000-bbbbbbbbbbbb"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-derived",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "schema": "dbo",
+          "table": "orders"
+        },
+        "physical_tables": [
+          {
+            "schema": "dbo",
+            "table": "orders",
+            "via": "navigation"
+          }
+        ],
+        "chain": [
+          "source-sql-direct"
+        ]
+      }
+    },
+    {
+      "name": "source-dynamic",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Web",
+          "function": "Contents"
+        },
+        "details": {
+          "url": "[param:FullUrl]"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-excel-local",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Excel",
+          "function": "Workbook"
+        },
+        "details": {
+          "file": "C:\\Data\\budget_data.xlsx",
+          "sheet": "Budget"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-excel-sharepoint",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "SharePoint",
+          "function": "Files"
+        },
+        "details": {
+          "sharepoint_url": "https://contoso.sharepoint.com/sites/DataTeam",
+          "file": "master_data.xlsx",
+          "sheet": "Sheet1"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-from-parameter",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "schema": "dbo",
+          "table": "customers"
+        },
+        "physical_tables": [
+          {
+            "schema": "dbo",
+            "table": "customers",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-hardcoded",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "hardcoded",
+        "connector": null,
+        "details": {},
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-odata",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "OData",
+          "function": "Feed"
+        },
+        "details": {
+          "table": "Orders",
+          "url": "https://services.odata.org/V4/Northwind/Northwind.svc/"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-odbc",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Odbc",
+          "function": "DataSource"
+        },
+        "details": {
+          "dsn": "dsn=MyRedshiftDSN"
+        },
+        "physical_tables": [
+          {
+            "schema": "public",
+            "table": "inventory_summary_v",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-sharepoint-file",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "SharePoint",
+          "function": "Files"
+        },
+        "details": {
+          "sharepoint_url": "https://contoso.sharepoint.com/sites/DataTeam"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-sharepoint-list",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "SharePoint",
+          "function": "Tables"
+        },
+        "details": {
+          "table": "Project Tracker",
+          "sharepoint_url": "https://contoso.sharepoint.com/sites/DataTeam"
+        },
+        "physical_tables": [
+          {
+            "schema": null,
+            "table": "Project Tracker",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-sql-direct",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "schema": "dbo",
+          "table": "orders"
+        },
+        "physical_tables": [
+          {
+            "schema": "dbo",
+            "table": "orders",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-sql-native-query",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "fake-server.database.windows.net",
+          "database": "SalesDB",
+          "native_query": "SELECT order_id, customer_id, order_date, amount FROM dbo.orders WHERE status = 'active'"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-unmapped-name-chain",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "CloudMart",
+          "function": "Warehouses"
+        },
+        "details": {},
+        "physical_tables": [
+          {
+            "schema": "REPORTING",
+            "table": "DAILY_SALES",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-unmapped-schema-nav",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "DataVault",
+          "function": "Contents"
+        },
+        "details": {},
+        "physical_tables": [
+          {
+            "schema": "mart",
+            "table": "orders_summary",
+            "via": "navigation"
+          }
+        ],
+        "chain": []
+      }
+    },
+    {
+      "name": "source-via-custom-function",
+      "query_group": "Source",
+      "source": {
+        "resolved": false,
+        "reason": "no connector, combine or query reference found"
+      }
+    },
+    {
+      "name": "source-web-api",
+      "query_group": "Source",
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Web",
+          "function": "Contents"
+        },
+        "details": {
+          "url": "https://api.example.com/v1/products"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "DatabaseName",
+      "type": "Text",
+      "value": "SalesDB",
+      "used_by": [
+        "source-from-parameter"
+      ]
+    },
+    {
+      "name": "ServerName",
+      "type": "Text",
+      "value": "fake-server.database.windows.net",
+      "used_by": [
+        "source-from-parameter"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "AddTax",
+      "description": "Adds sales tax to a net amount using the given rate.",
+      "expression": null,
+      "used_by": []
+    },
+    {
+      "name": "SafeStockThreshold",
+      "description": "Returns the reorder threshold for a product category.",
+      "expression": null,
+      "used_by": []
+    }
+  ],
+  "roles": [
+    {
+      "name": "Administrators",
+      "dynamic_function": null,
+      "filters": []
+    },
+    {
+      "name": "Area Supervisors",
+      "dynamic_function": null,
+      "filters": [
+        {
+          "table": "dim-product",
+          "expression": "[category] = \"Hardware\""
+        },
+        {
+          "table": "fact-sales",
+          "expression": "[region] = \"South\""
+        }
+      ]
+    },
+    {
+      "name": "Employees",
+      "dynamic_function": "USERPRINCIPALNAME",
+      "filters": [
+        {
+          "table": "dim-product",
+          "expression": "USERPRINCIPALNAME() = [email]"
+        }
+      ]
+    },
+    {
+      "name": "Legacy Users",
+      "dynamic_function": "USERNAME",
+      "filters": [
+        {
+          "table": "dim-product",
+          "expression": "USERNAME() = [username]"
+        }
+      ]
+    },
+    {
+      "name": "Regional Managers",
+      "dynamic_function": null,
+      "filters": [
+        {
+          "table": "fact-sales",
+          "expression": "[region] = \"North\""
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "hidden_reference",
+      "object": "Order Fulfillment Summary",
+      "table": "fact-sales",
+      "detail": "[Open Order Count]"
+    },
+    {
+      "code": "hidden_reference",
+      "object": "Order Fulfillment Summary",
+      "table": "fact-sales",
+      "detail": "helper-order-lookup[status_code]"
+    },
+    {
+      "code": "unresolved_source",
+      "object": "source-via-custom-function",
+      "table": null,
+      "detail": "no connector, combine or query reference found"
+    }
+  ]
+}

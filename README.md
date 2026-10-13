@@ -2,9 +2,9 @@
 
 Automated documentation generator for Power BI projects.
 
-Reads TMDL files from a folder of `.pbip` reports and generates structured HTML or Markdown documentation for each one - covering data sources, tables, measures, relationships, M parameters, security roles, and calculation groups.
+Reads TMDL files from a folder of `.pbip` reports and generates structured HTML, Markdown, plain-text or JSON documentation for each one - covering data sources, tables, measures, relationships, M parameters, security roles, and calculation groups.
 
-Runs as a standalone Windows desktop app or as a headless command-line tool. Output can be HTML (opens in any browser) or Markdown (README.md for GitHub). A live file watcher regenerates documentation automatically on every save.
+Runs as a standalone Windows desktop app or as a headless command-line tool. Output can be HTML (opens in any browser), Markdown (README.md for GitHub) plain text (`<report>.txt` for terminals, tickets and AI agents) or typed JSON (`<report>.json` for tools and CI). A live file watcher regenerates documentation automatically on every save.
 
 ---
 
@@ -14,6 +14,8 @@ See a [real example output](sample/README.md) generated from the included sample
 
 Each generated README includes:
 
+- **Contents** - a linked table of contents of the sections below (Markdown and HTML)
+- **Lineage** (optional, Markdown) - a Mermaid source-to-table flowchart, see [Lineage diagram](#lineage-diagram)
 - **Data Sources** - connector type and resolved source detail for every query. 30+ Power Query connector functions have dedicated labels (SQL, Dataflows, SharePoint, Excel, OData, Azure Blob/Table/Data Lake storage, Databricks, Snowflake, Salesforce, Oracle, PostgreSQL, SAP HANA, and more); any connector without a dedicated label is still auto-detected from the query and shown with its namespace and function for manual labelling.
 - **Table Details** - table type, source detail, and column list
 - **Measures** - full DAX (optional), display folder, and format string
@@ -73,13 +75,15 @@ python main.py
 4. Press **Run Now** to generate documentation for all reports
 5. Enable **Watch for TMDL changes** to auto-regenerate on every save
 
+Each report's semantic model folder is found in this order: the report listed in the `.pbip` file's `artifacts`, then that report's `definition.pbir` (`datasetReference` `byPath`), then a `<pbip name>.SemanticModel` folder next to the `.pbip` as a fallback when the first two are absent. A report whose `definition.pbir` uses `byConnection` is skipped, because it has no local model, and so is a `byPath` reference to a missing folder. A model folder without a `definition/` TMDL folder (for example a `model.bim` project) is skipped with a message, and an existing output file is left untouched.
+
 If no output folder is set, each `README.md` is written next to its `.pbip` file. If a separate output folder is set, each report gets its own named subfolder inside it - for example `docs/SalesReport/README.md`, `docs/FinanceReport/README.md` - so multiple reports never collide.
 
-Optional documentation metadata (owner, team, refresh schedule) is set in the **Configure** tab and stored in `config.json` next to the app. Values left blank are omitted from the generated output.
+Optional documentation metadata (owner, team, refresh schedule) is set in the **Configure** tab and stored in `config.json`: next to the executable for the standalone app, in the repository root when run from source, and in `%APPDATA%\tmdl-lens` on Windows or `~/.config/tmdl-lens` elsewhere for a pip install. A pip install that finds no file there copies an older `config.json` from its package folder once and leaves the old file in place. Values left blank are omitted from the generated output.
 
 By default the app skips reports whose TMDL files and documentation settings have not changed since the last run - each report is hashed, and only reports that actually moved are regenerated. Turn this off with **Skip reports with no TMDL changes** in **Configure**.
 
-On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html` or `md`.
+On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html`, `md`, `txt` or `json`. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
 
 ### Command line
 
@@ -90,7 +94,22 @@ tmdl-lens --reports-folder C:\path\to\reports
 tmdl-lens -r C:\path\to\reports -o docs --format html --overwrite
 ```
 
-Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing. Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs.
+Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everything succeeds, `1` when a report fails or the reports folder does not exist, and `2` when `--reports-folder` is missing or the file passed to `--config` exists but cannot be parsed (a UTF-8 byte order mark is accepted). Settings can be read from a `config.json` with `--config` (CLI flags override file values) - this is also what makes `--skip-unchanged` persist its content hashes between runs. A `--config` path that does not exist is warned about and not created; relative paths inside the config resolve against the config file's folder. A value of the wrong type is warned about and replaced by its default for that run, and the file keeps your value. With `--skip-unchanged`, a report whose content changed is regenerated even when `--overwrite` is off.
+
+### Output formats
+
+| `--format` | File per report | Content |
+|---|---|---|
+| `html` (default) | `<report>.html` | styled page for a browser |
+| `md` | `README.md` | Markdown for GitHub and other repository viewers |
+| `txt` | `<report>.txt` | plain text: the same sections as the Markdown, with aligned columns, no markup, ASCII headings and LF line endings on every platform |
+| `json` | `<report>.json` | typed data for tools and CI, described by [`docs/tmdl-lens-output.schema.json`](docs/tmdl-lens-output.schema.json) |
+
+The JSON output is versioned by `schema_version` (currently `1.0`) and is deterministic across machines: no timestamp or tool version, every list of named items sorted by name, LF line endings. Values are fixed codes rather than display text (`kind`, `source.type`, `cardinality`, `cross_filter`, `security_filter`, warning `code`), a source that could not be resolved is `{"resolved": false, "reason": ...}`, and `source` is `null` for a table without an M source. Every shared expression is listed under `expressions`, including those no table uses. With `--no-include-dax`, every `expression` is `null`; hidden-reference warnings are still reported.
+
+### Lineage diagram
+
+`--include-lineage` (config key `include_lineage`, GUI option **Include lineage diagram**) adds a `### Lineage` sub-section at the end of "1. Data Sources" in the Markdown output: a Mermaid flowchart from each external source, through the shared queries, to every loaded and not-loaded table. GitHub, Azure DevOps and the VS Code preview render it without any script, so the output stays offline. Helper functions, scalar helpers and parameters are left out. It is off by default, and with it off the output is unchanged. The diagram is Markdown-only: with `--format html`, `txt` or `json` the option has no effect and a warning is logged once per run (the JSON output already carries each source's `chain` and `combine_sources`). Node ids are derived from a SHA-256 of each node's identity, so the diagram is byte-identical across runs and machines, and adding a table does not rename the other nodes.
 
 ---
 
@@ -116,15 +135,16 @@ change and requires a new major version, announced in the GitHub release notes.
 **CLI flags** (`tmdl-lens` command):
 
 `--version`, `-r` / `--reports-folder`, `-o` / `--output-folder`,
-`--format` (`html` or `md`), `--include-dax` / `--no-include-dax`,
-`--overwrite` / `--no-overwrite`, `--skip-unchanged` / `--no-skip-unchanged`,
+`--format` (`html`, `md`, `txt` or `json`), `--include-dax` / `--no-include-dax`,
+`--include-lineage` / `--no-include-lineage`, `--overwrite` / `--no-overwrite`, `--skip-unchanged` / `--no-skip-unchanged`,
 `--owner`, `--team`, `--refresh-schedule`, `--config`, `-q` / `--quiet`.
 
 **Exit codes:** `0` success; `1` a report failed or the reports folder does
-not exist; `2` `--reports-folder` is missing.
+not exist; `2` `--reports-folder` is missing or the `--config` file exists
+but cannot be parsed.
 
 **`config.json` keys:** `reports_folder`, `output_folder`, `output_format`,
-`overwrite_readme`, `include_dax`, `skip_unchanged`, `watch_debounce`,
+`overwrite_readme`, `include_dax`, `include_lineage`, `skip_unchanged`, `watch_debounce`,
 `owner`, `team`, `refresh_schedule`, `file_hashes`, `features.watcher`.
 
 Not part of the contract: importing `tmdl_lens.*` as a Python library (the
@@ -134,7 +154,8 @@ exact wording or layout of the generated HTML/Markdown (best effort).
 ## Limitations
 
 - Import-mode PBIP reports only. Live Connection, Direct Lake and other
-  models without a `definition/` TMDL folder are not documented.
+  models without a `definition/` TMDL folder are not documented; such a
+  report is skipped with a message naming the reason.
 - Connectors are detected from the query text. Known connectors get a
   dedicated label; anything else is shown with its Power Query namespace and
   function and is meant to be labelled manually.

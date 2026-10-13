@@ -280,8 +280,8 @@ def test_html_generation(sample_model, sample_resolved, gen_config):
     html = generate_html(sample_model, sample_resolved, gen_config)
     assert html.startswith("<!DOCTYPE html>")
     assert "tmdl-lens Test Report" in html
-    assert "<h2>1. Data Sources</h2>" in html
-    assert "<h2>8. Model Statistics</h2>" in html
+    assert '<h2 id="data-sources">1. Data Sources</h2>' in html
+    assert '<h2 id="statistics">8. Model Statistics</h2>' in html
 
 
 def test_generation_is_deterministic(sample_model, sample_resolved, gen_config):
