@@ -136,3 +136,16 @@ def test_txt_format_writes_one_lf_file_per_report(tmp_path):
         assert b"\r" not in data
         assert data.startswith(f"{name}\n".encode("utf-8"))
     assert sorted(p.name for p in out.rglob("*") if p.is_file()) == ["Finance.txt", "Sales.txt"]
+
+
+def test_json_format_writes_one_lf_file_per_report(tmp_path):
+    reports = tmp_path / "reports"
+    _make_report(reports, "", "Sales")
+    rc = main(["--reports-folder", str(reports), "--format", "json"])
+    assert rc == 0
+    data = (reports / "Sales.json").read_bytes()
+    assert b"\r" not in data
+    document = json.loads(data.decode("utf-8"))
+    assert document["schema_version"] == "1.0"
+    assert document["report"]["name"] == "Sales"
+    assert sorted(p.name for p in reports.iterdir() if p.is_file()) == ["Sales.json", "Sales.pbip"]

@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 from tmdl_lens.tmdl_parser import parse_semantic_model
 from tmdl_lens.source_resolver import resolve_sources
+from tmdl_lens.json_writer import generate_json
 from tmdl_lens.readme_generator import generate_readme, generate_html, generate_text
 from tmdl_lens.version import __version__
 
@@ -109,8 +110,8 @@ def _get_output_path(
     """Resolve the output file path for one report."""
     if output_format == "html":
         out_filename = f"{pbip_name}.html"
-    elif output_format == "txt":
-        out_filename = f"{pbip_name}.txt"
+    elif output_format in ("txt", "json"):
+        out_filename = f"{pbip_name}.{output_format}"
     else:
         out_filename = "README.md"
     if custom_out:
@@ -380,10 +381,11 @@ class Pipeline:
             renderer = {
                 "html": generate_html,
                 "txt": generate_text,
+                "json": generate_json,
             }.get(self.config.output_format, generate_readme)
             content = renderer(model, resolved, gen_config)
 
-            newline = "\n" if self.config.output_format == "txt" else None
+            newline = "\n" if self.config.output_format in ("txt", "json") else None
             os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
             with open(out_path, "w", encoding="utf-8", newline=newline) as f:
                 f.write(content)

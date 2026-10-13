@@ -2,9 +2,9 @@
 
 Automated documentation generator for Power BI projects.
 
-Reads TMDL files from a folder of `.pbip` reports and generates structured HTML, Markdown or plain-text documentation for each one - covering data sources, tables, measures, relationships, M parameters, security roles, and calculation groups.
+Reads TMDL files from a folder of `.pbip` reports and generates structured HTML, Markdown, plain-text or JSON documentation for each one - covering data sources, tables, measures, relationships, M parameters, security roles, and calculation groups.
 
-Runs as a standalone Windows desktop app or as a headless command-line tool. Output can be HTML (opens in any browser), Markdown (README.md for GitHub) or plain text (`<report>.txt` for terminals, tickets and AI agents). A live file watcher regenerates documentation automatically on every save.
+Runs as a standalone Windows desktop app or as a headless command-line tool. Output can be HTML (opens in any browser), Markdown (README.md for GitHub) plain text (`<report>.txt` for terminals, tickets and AI agents) or typed JSON (`<report>.json` for tools and CI). A live file watcher regenerates documentation automatically on every save.
 
 ---
 
@@ -81,7 +81,7 @@ Optional documentation metadata (owner, team, refresh schedule) is set in the **
 
 By default the app skips reports whose TMDL files and documentation settings have not changed since the last run - each report is hashed, and only reports that actually moved are regenerated. Turn this off with **Skip reports with no TMDL changes** in **Configure**.
 
-On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html`, `md` or `txt`. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
+On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html`, `md`, `txt` or `json`. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
 
 ### Command line
 
@@ -101,6 +101,9 @@ Run `tmdl-lens --help` for the full list of options. Exit codes: `0` when everyt
 | `html` (default) | `<report>.html` | styled page for a browser |
 | `md` | `README.md` | Markdown for GitHub and other repository viewers |
 | `txt` | `<report>.txt` | plain text: the same sections as the Markdown, with aligned columns, no markup, ASCII headings and LF line endings on every platform |
+| `json` | `<report>.json` | typed data for tools and CI, described by [`docs/tmdl-lens-output.schema.json`](docs/tmdl-lens-output.schema.json) |
+
+The JSON output is versioned by `schema_version` (currently `1.0`) and is deterministic across machines: no timestamp or tool version, every list of named items sorted by name, LF line endings. Values are fixed codes rather than display text (`kind`, `source.type`, `cardinality`, `cross_filter`, `security_filter`, warning `code`), a source that could not be resolved is `{"resolved": false, "reason": ...}`, and `source` is `null` for a table without an M source. Every shared expression is listed under `expressions`, including those no table uses. With `--no-include-dax`, every `expression` is `null`; hidden-reference warnings are still reported.
 
 ---
 
@@ -126,7 +129,7 @@ change and requires a new major version, announced in the GitHub release notes.
 **CLI flags** (`tmdl-lens` command):
 
 `--version`, `-r` / `--reports-folder`, `-o` / `--output-folder`,
-`--format` (`html`, `md` or `txt`), `--include-dax` / `--no-include-dax`,
+`--format` (`html`, `md`, `txt` or `json`), `--include-dax` / `--no-include-dax`,
 `--overwrite` / `--no-overwrite`, `--skip-unchanged` / `--no-skip-unchanged`,
 `--owner`, `--team`, `--refresh-schedule`, `--config`, `-q` / `--quiet`.
 

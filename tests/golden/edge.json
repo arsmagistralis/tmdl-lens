@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "report": {
+    "name": "edge",
+    "owner": null,
+    "team": null,
+    "refresh_schedule": null
+  },
+  "model": {
+    "culture": null,
+    "compatibility_level": null,
+    "data_source_version": null
+  },
+  "tables": [
+    {
+      "name": "Lookup",
+      "kind": "loaded",
+      "is_hidden": true,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Sql",
+          "function": "Database"
+        },
+        "details": {
+          "server": "srv",
+          "database": "db"
+        },
+        "physical_tables": [],
+        "chain": []
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "Key",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": null,
+          "summarize_by": null,
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [],
+      "calculation_items": []
+    },
+    {
+      "name": "Sales",
+      "kind": "loaded",
+      "is_hidden": false,
+      "description": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Web",
+          "function": "Contents"
+        },
+        "details": {
+          "url": "https://example.com/api/sales"
+        },
+        "physical_tables": [],
+        "chain": []
+      },
+      "expression": null,
+      "columns": [
+        {
+          "name": "Amount",
+          "data_type": "decimal",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "#,0.00",
+          "summarize_by": null,
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "Date",
+          "data_type": "dateTime",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": false,
+          "format_string": "yyyy-mm-dd",
+          "summarize_by": null,
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        },
+        {
+          "name": "Key",
+          "data_type": "int64",
+          "is_calculated": false,
+          "is_hidden": false,
+          "is_key": true,
+          "format_string": null,
+          "summarize_by": "none",
+          "source_column": null,
+          "sort_by_column": null,
+          "data_category": null,
+          "description": null,
+          "expression": null
+        }
+      ],
+      "measures": [
+        {
+          "name": "Margin",
+          "display_folder": "Finance\\Margins",
+          "format_string": "0.0%",
+          "description": null,
+          "is_hidden": false,
+          "expression": "SUM(Sales[Amount]) * 0.1"
+        },
+        {
+          "name": "Plain",
+          "display_folder": null,
+          "format_string": null,
+          "description": null,
+          "is_hidden": false,
+          "expression": "1"
+        },
+        {
+          "name": "Units",
+          "display_folder": "Volume",
+          "format_string": null,
+          "description": null,
+          "is_hidden": false,
+          "expression": "COUNTROWS(Sales)"
+        }
+      ],
+      "calculation_items": []
+    }
+  ],
+  "relationships": [
+    {
+      "from_table": "Sales",
+      "from_column": "Key",
+      "to_table": "Lookup",
+      "to_column": "Key",
+      "is_active": true,
+      "cardinality": null,
+      "cross_filter": "one_direction",
+      "security_filter": "one_direction"
+    }
+  ],
+  "expressions": [
+    {
+      "name": "sales-source",
+      "query_group": null,
+      "source": {
+        "resolved": true,
+        "type": "connector",
+        "connector": {
+          "namespace": "Web",
+          "function": "Contents"
+        },
+        "details": {
+          "url": "https://example.com/api/sales"
+        },
+        "physical_tables": [],
+        "chain": []
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "BlankParam",
+      "type": "Text",
+      "value": null,
+      "used_by": []
+    },
+    {
+      "name": "Region",
+      "type": "Text",
+      "value": "EU",
+      "used_by": []
+    }
+  ],
+  "functions": [],
+  "roles": [],
+  "warnings": []
+}

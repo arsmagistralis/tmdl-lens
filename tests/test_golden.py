@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+from tmdl_lens.json_writer import generate_json
 from tmdl_lens.readme_generator import _SECTIONS, generate_html, generate_readme, generate_text
 from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.tmdl_parser import (
@@ -37,9 +38,13 @@ GOLDEN_FILES = {
     ("nodax", "txt"): os.path.join(GOLDEN_DIR, "sample-nodax.txt"),
     ("empty", "txt"): os.path.join(GOLDEN_DIR, "empty.txt"),
     ("edge", "txt"): os.path.join(GOLDEN_DIR, "edge.txt"),
+    ("full", "json"): os.path.join(GOLDEN_DIR, "sample-full.json"),
+    ("nodax", "json"): os.path.join(GOLDEN_DIR, "sample-nodax.json"),
+    ("empty", "json"): os.path.join(GOLDEN_DIR, "empty.json"),
+    ("edge", "json"): os.path.join(GOLDEN_DIR, "edge.json"),
 }
 
-RENDERERS = {"md": generate_readme, "html": generate_html, "txt": generate_text}
+RENDERERS = {"md": generate_readme, "html": generate_html, "txt": generate_text, "json": generate_json}
 
 SECTION_TITLES = [title for _, title in _SECTIONS]
 CASES_WITH_UNRESOLVED = {"full", "nodax"}

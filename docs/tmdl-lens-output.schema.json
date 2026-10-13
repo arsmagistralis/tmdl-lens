@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nox-magistralis/tmdl-lens/blob/main/docs/tmdl-lens-output.schema.json",
+  "title": "tmdl-lens JSON output",
+  "description": "Output of tmdl-lens --format json. Every list of named items is sorted by name; source.chain keeps its lineage order. No timestamp or tool version is written.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report", "model", "tables", "relationships", "expressions", "parameters", "functions", "roles", "warnings"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "owner", "team", "refresh_schedule"],
+      "properties": {
+        "name": {"type": "string"},
+        "owner": {"type": ["string", "null"]},
+        "team": {"type": ["string", "null"]},
+        "refresh_schedule": {"type": ["string", "null"]}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["culture", "compatibility_level", "data_source_version"],
+      "properties": {
+        "culture": {"type": ["string", "null"]},
+        "compatibility_level": {"type": ["integer", "null"]},
+        "data_source_version": {"type": ["string", "null"]}
+      }
+    },
+    "tables": {"type": "array", "items": {"$ref": "#/$defs/table"}},
+    "relationships": {"type": "array", "items": {"$ref": "#/$defs/relationship"}},
+    "expressions": {"type": "array", "items": {"$ref": "#/$defs/expression"}},
+    "parameters": {"type": "array", "items": {"$ref": "#/$defs/parameter"}},
+    "functions": {"type": "array", "items": {"$ref": "#/$defs/function"}},
+    "roles": {"type": "array", "items": {"$ref": "#/$defs/role"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}}
+  },
+  "$defs": {
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "is_hidden", "description", "source", "expression", "columns", "measures", "calculation_items"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"enum": ["loaded", "not_loaded", "calculated", "field_parameter", "measures_only", "calculation_group"]},
+        "is_hidden": {"type": "boolean"},
+        "description": {"type": ["string", "null"]},
+        "source": {"$ref": "#/$defs/source"},
+        "expression": {"type": ["string", "null"]},
+        "columns": {"type": "array", "items": {"$ref": "#/$defs/column"}},
+        "measures": {"type": "array", "items": {"$ref": "#/$defs/measure"}},
+        "calculation_items": {"type": "array", "items": {"$ref": "#/$defs/calculation_item"}}
+      }
+    },
+    "source": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved", "reason"],
+          "properties": {
+            "resolved": {"const": false},
+            "reason": {"type": "string"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved", "type", "connector", "details", "physical_tables", "chain"],
+          "properties": {
+            "resolved": {"const": true},
+            "type": {"enum": ["connector", "table_combine", "hardcoded", "embedded", "generated", "dynamic", "function_def", "scalar_helper"]},
+            "connector": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["namespace", "function"],
+                  "properties": {
+                    "namespace": {"type": "string"},
+                    "function": {"type": "string"}
+                  }
+                }
+              ]
+            },
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "server": {"type": "string"},
+                "database": {"type": "string"},
+                "schema": {"type": "string"},
+                "table": {"type": "string"},
+                "dsn": {"type": "string"},
+                "sharepoint_url": {"type": "string"},
+                "file": {"type": "string"},
+                "sheet": {"type": "string"},
+                "url": {"type": "string"},
+                "account": {"type": "string"},
+                "container": {"type": "string"},
+                "entity": {"type": "string"},
+                "workspace_id": {"type": "string"},
+                "dataflow_id": {"type": "string"},
+                "native_query": {"type": "string"}
+              }
+            },
+            "physical_tables": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["schema", "table", "via"],
+                "properties": {
+                  "schema": {"type": ["string", "null"]},
+                  "table": {"type": "string"},
+                  "via": {"enum": ["navigation", "native_query"]}
+                }
+              }
+            },
+            "chain": {"type": "array", "items": {"type": "string"}},
+            "combine_sources": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "data_type", "is_calculated", "is_hidden", "is_key", "format_string", "summarize_by", "source_column", "sort_by_column", "data_category", "description", "expression"],
+      "properties": {
+        "name": {"type": "string"},
+        "data_type": {"type": "string"},
+        "is_calculated": {"type": "boolean"},
+        "is_hidden": {"type": "boolean"},
+        "is_key": {"type": "boolean"},
+        "format_string": {"type": ["string", "null"]},
+        "summarize_by": {"type": ["string", "null"]},
+        "source_column": {"type": ["string", "null"]},
+        "sort_by_column": {"type": ["string", "null"]},
+        "data_category": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "expression": {"type": ["string", "null"]}
+      }
+    },
+    "measure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "display_folder", "format_string", "description", "is_hidden", "expression"],
+      "properties": {
+        "name": {"type": "string"},
+        "display_folder": {"type": ["string", "null"]},
+        "format_string": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "is_hidden": {"type": "boolean"},
+        "expression": {"type": ["string", "null"]}
+      }
+    },
+    "calculation_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "ordinal", "format_string_expression", "expression"],
+      "properties": {
+        "name": {"type": "string"},
+        "ordinal": {"type": "integer"},
+        "format_string_expression": {"type": ["string", "null"]},
+        "expression": {"type": ["string", "null"]}
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_table", "from_column", "to_table", "to_column", "is_active", "cardinality", "cross_filter", "security_filter"],
+      "properties": {
+        "from_table": {"type": "string"},
+        "from_column": {"type": "string"},
+        "to_table": {"type": "string"},
+        "to_column": {"type": "string"},
+        "is_active": {"type": "boolean"},
+        "cardinality": {"enum": ["one_to_many", "many_to_one", "many_to_many", "one_to_one", null]},
+        "cross_filter": {"enum": ["one_direction", "both_directions", "automatic", null]},
+        "security_filter": {"enum": ["one_direction", "both_directions", "none", null]}
+      }
+    },
+    "expression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "query_group", "source"],
+      "properties": {
+        "name": {"type": "string"},
+        "query_group": {"type": ["string", "null"]},
+        "source": {"$ref": "#/$defs/source"}
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "value", "used_by"],
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "value": {"type": ["string", "null"]},
+        "used_by": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "expression", "used_by"],
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": ["string", "null"]},
+        "expression": {"type": ["string", "null"]},
+        "used_by": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["measure", "table"],
+            "properties": {
+              "measure": {"type": "string"},
+              "table": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dynamic_function", "filters"],
+      "properties": {
+        "name": {"type": "string"},
+        "dynamic_function": {"type": ["string", "null"]},
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["table", "expression"],
+            "properties": {
+              "table": {"type": "string"},
+              "expression": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "object", "table", "detail"],
+      "properties": {
+        "code": {"enum": ["unresolved_source", "hidden_reference"]},
+        "object": {"type": "string"},
+        "table": {"type": ["string", "null"]},
+        "detail": {"type": "string"}
+      }
+    }
+  }
+}

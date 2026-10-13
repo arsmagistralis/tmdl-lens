@@ -63,7 +63,7 @@ def test_cli_exposes_all_contract_flags():
     assert STABLE_SHORT_FLAGS <= flags
 
 
-STABLE_FORMATS = {"html", "md", "txt"}
+STABLE_FORMATS = {"html", "md", "txt", "json"}
 
 
 def test_cli_format_accepts_all_contract_values():

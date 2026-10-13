@@ -253,7 +253,7 @@ class App(ctk.CTk):
         self._format_var = tk.StringVar(value="HTML")
         ctk.CTkOptionMenu(
             format_row,
-            values=["HTML", "MD", "TXT"],
+            values=["HTML", "MD", "TXT", "JSON"],
             variable=self._format_var,
             width=80, height=28,
             fg_color=COLORS["bg"],
@@ -716,7 +716,7 @@ class App(ctk.CTk):
         self._output_var.set(c.get("output_folder", ""))
         self._overwrite_var.set(c.get("overwrite_readme", False))
         output_format = c.get("output_format", "html")
-        self._format_var.set(output_format.upper() if output_format in ("html", "md", "txt") else "HTML")
+        self._format_var.set(output_format.upper() if output_format in ("html", "md", "txt", "json") else "HTML")
         self._dax_var.set(c.get("include_dax", True))
         self._skip_var.set(c.get("skip_unchanged", True))
         self._watch_var.set(False)  # always off on startup - user enables manually
