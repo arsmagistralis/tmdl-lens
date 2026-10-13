@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from tmdl_lens.tmdl_parser import parse_semantic_model
 from tmdl_lens.source_resolver import resolve_sources
-from tmdl_lens.readme_generator import generate_readme, generate_html
+from tmdl_lens.readme_generator import generate_readme, generate_html, generate_text
 from tmdl_lens.version import __version__
 
 
@@ -107,7 +107,12 @@ def _get_output_path(
     custom_out: str,
 ) -> str:
     """Resolve the output file path for one report."""
-    out_filename = f"{pbip_name}.html" if output_format == "html" else "README.md"
+    if output_format == "html":
+        out_filename = f"{pbip_name}.html"
+    elif output_format == "txt":
+        out_filename = f"{pbip_name}.txt"
+    else:
+        out_filename = "README.md"
     if custom_out:
         # Each report gets its own subfolder so multiple reports never collide
         return os.path.join(custom_out, pbip_name, out_filename)
@@ -372,12 +377,15 @@ class Pipeline:
             )
             gen_config = _build_gen_config(pbip_name, self.config)
 
-            content = generate_html(model, resolved, gen_config) \
-                if self.config.output_format == "html" \
-                else generate_readme(model, resolved, gen_config)
+            renderer = {
+                "html": generate_html,
+                "txt": generate_text,
+            }.get(self.config.output_format, generate_readme)
+            content = renderer(model, resolved, gen_config)
 
+            newline = "\n" if self.config.output_format == "txt" else None
             os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-            with open(out_path, "w", encoding="utf-8") as f:
+            with open(out_path, "w", encoding="utf-8", newline=newline) as f:
                 f.write(content)
 
             out_filename = os.path.basename(out_path)

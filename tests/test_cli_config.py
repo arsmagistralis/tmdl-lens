@@ -122,3 +122,17 @@ def test_wrong_typed_value_is_warned_replaced_and_kept_in_file(tmp_path, capsys)
     saved = json.loads(cfg.read_text(encoding="utf-8"))
     assert saved["include_dax"] == "yes"
     assert "Sales.pbip" in saved["file_hashes"]
+
+
+def test_txt_format_writes_one_lf_file_per_report(tmp_path):
+    reports = tmp_path / "reports"
+    _make_report(reports, "a", "Sales")
+    _make_report(reports, "b", "Finance")
+    out = tmp_path / "out"
+    rc = main(["--reports-folder", str(reports), "--output-folder", str(out), "--format", "txt"])
+    assert rc == 0
+    for name in ("Sales", "Finance"):
+        data = (out / name / f"{name}.txt").read_bytes()
+        assert b"\r" not in data
+        assert data.startswith(f"{name}\n".encode("utf-8"))
+    assert sorted(p.name for p in out.rglob("*") if p.is_file()) == ["Finance.txt", "Sales.txt"]

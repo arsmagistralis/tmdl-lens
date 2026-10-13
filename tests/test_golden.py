@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from tmdl_lens.readme_generator import _SECTIONS, generate_html, generate_readme
+from tmdl_lens.readme_generator import _SECTIONS, generate_html, generate_readme, generate_text
 from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.tmdl_parser import (
     Column,
@@ -33,7 +33,13 @@ GOLDEN_FILES = {
     ("empty", "html"): os.path.join(GOLDEN_DIR, "empty.html"),
     ("edge", "md"): os.path.join(GOLDEN_DIR, "edge.md"),
     ("edge", "html"): os.path.join(GOLDEN_DIR, "edge.html"),
+    ("full", "txt"): os.path.join(GOLDEN_DIR, "sample-full.txt"),
+    ("nodax", "txt"): os.path.join(GOLDEN_DIR, "sample-nodax.txt"),
+    ("empty", "txt"): os.path.join(GOLDEN_DIR, "empty.txt"),
+    ("edge", "txt"): os.path.join(GOLDEN_DIR, "edge.txt"),
 }
+
+RENDERERS = {"md": generate_readme, "html": generate_html, "txt": generate_text}
 
 SECTION_TITLES = [title for _, title in _SECTIONS]
 CASES_WITH_UNRESOLVED = {"full", "nodax"}
@@ -134,8 +140,7 @@ def _render(case, fmt):
     else:
         model, resolved = _edge()
         config = _gen_config("edge", include_dax=True, metadata=False)
-    renderer = generate_readme if fmt == "md" else generate_html
-    return renderer(model, resolved, config)
+    return RENDERERS[fmt](model, resolved, config)
 
 
 @pytest.mark.parametrize("case, fmt", sorted(GOLDEN_FILES))
@@ -166,5 +171,30 @@ def test_both_renderers_emit_the_section_titles_in_order(case):
         re.sub(r"^&#9888; ", "", t)
         for t in re.findall(r"<h2>(.*?)</h2>", _render(case, "html"))
     ]
+    text_lines = _render(case, "txt").split("\n")
+    text_titles = [
+        re.sub(r"^! ", "", line)
+        for line, below in zip(text_lines, text_lines[1:])
+        if line and below == "-" * len(line)
+    ]
     assert md_titles == expected
     assert html_titles == expected
+    assert text_titles == expected
+
+
+@pytest.mark.parametrize("case", ["full", "nodax", "empty", "edge"])
+def test_text_output_is_plain(case):
+    text = _render(case, "txt")
+    assert text.endswith("\n")
+    assert "\r" not in text
+    assert "⚠" not in text
+    for line in text.split("\n"):
+        assert line == line.rstrip()
+    assert "```" not in text
+    assert "**" not in text
+    assert "<" + "code>" not in text
+    assert "| ---" not in text and "|---|" not in text
+
+
+def test_text_is_deterministic():
+    assert _render("full", "txt") == _render("full", "txt")

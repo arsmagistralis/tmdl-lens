@@ -31,8 +31,8 @@ def _make_parser() -> argparse.ArgumentParser:
         help="output folder for generated docs",
     )
     parser.add_argument(
-        "--format", choices=("html", "md"), default=None,
-        help="output format: html or md",
+        "--format", choices=("html", "md", "txt"), default=None,
+        help="output format: html, md or txt",
     )
     parser.add_argument(
         "--include-dax", dest="include_dax", action="store_true", default=None,

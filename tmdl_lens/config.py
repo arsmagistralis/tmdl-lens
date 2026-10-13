@@ -309,9 +309,9 @@ def validate_config(config: dict) -> list:
             )
 
     output_format = str(config.get("output_format", "")).strip()
-    if output_format and output_format not in ("html", "md"):
+    if output_format and output_format not in ("html", "md", "txt"):
         warnings.append(
-            f"output_format must be 'html' or 'md' (got {output_format!r})"
+            f"output_format must be 'html', 'md' or 'txt' (got {output_format!r})"
         )
 
     return warnings

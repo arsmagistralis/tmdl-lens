@@ -78,6 +78,12 @@ def test_invalid_output_format_warns():
     assert any("output_format" in w for w in warnings)
 
 
+@pytest.mark.parametrize("value", ["html", "md", "txt"])
+def test_supported_output_formats_do_not_warn(value):
+    warnings = validate_config({"output_format": value})
+    assert not any("output_format" in w for w in warnings)
+
+
 def test_bom_file_loads_values(cfg_file):
     cfg_file.write_bytes(b'\xef\xbb\xbf{"owner": "o", "output_format": "md"}')
     result = config.load_result()

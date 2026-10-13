@@ -8,6 +8,8 @@ a config.json key is a breaking change - this file exists so an accidental
 change fails CI instead of silently breaking users.
 """
 
+import pytest
+
 from tmdl_lens import config as config_mod
 from tmdl_lens.cli import _build_config, _make_parser, main
 
@@ -59,6 +61,23 @@ def test_cli_exposes_all_contract_flags():
     flags = _parser_flags()
     assert STABLE_LONG_FLAGS <= flags
     assert STABLE_SHORT_FLAGS <= flags
+
+
+STABLE_FORMATS = {"html", "md", "txt"}
+
+
+def test_cli_format_accepts_all_contract_values():
+    parser = _make_parser()
+    action = next(a for a in parser._actions if "--format" in a.option_strings)
+    assert STABLE_FORMATS <= set(action.choices)
+    for value in STABLE_FORMATS:
+        assert parser.parse_args(["--format", value]).format == value
+
+
+def test_cli_rejects_unknown_format_with_exit_2():
+    with pytest.raises(SystemExit) as exc:
+        _make_parser().parse_args(["--format", "pdf"])
+    assert exc.value.code == 2
 
 
 def test_cli_exit_2_without_reports_folder():
