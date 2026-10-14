@@ -243,16 +243,10 @@ def _classify_table(name: str, partition_type: str, content: str) -> str:
         return "fact"
     if n.startswith("dim") or n.startswith("d_") or n.startswith("d-"):
         return "dim"
-    if n.startswith("param") or n.endswith("selector") or n.endswith("parameter"):
-        return "field_parameter"
-    if n.startswith("_") or n == "measures" or "measure" in n:
-        return "measures_only"
     if n.startswith("source") or n.startswith("src"):
         return "staging"
     if n.startswith("helper") or n.startswith("hlp"):
         return "helper"
-    if n.startswith("calc") or n.startswith("cg"):
-        return "calc_group"
     return "other"
 
 
@@ -424,20 +418,23 @@ def _parse_tree(lines: list, start: int, parent_indent: int) -> tuple[list, int]
 
 
 def _find_child(node: "TmdlNode", key: str) -> Optional["TmdlNode"]:
+    lowered = key.lower()
     for c in node.children:
-        if c.key == key:
+        if c.key.lower() == lowered:
             return c
     return None
 
 
 def _find_children(node: "TmdlNode", key: str) -> list:
-    return [c for c in node.children if c.key == key]
+    lowered = key.lower()
+    return [c for c in node.children if c.key.lower() == lowered]
 
 
 _COL_PROP_STOP = re.compile(
     r"^(?:dataType|lineageTag|summarizeBy|sourceColumn|formatString|sortByColumn"
     r"|dataCategory|displayFolder|description|isHidden|isKey|isNullable|isUnique"
-    r"|annotation|extendedProperty|changedProperty|relatedColumnDetails)\b"
+    r"|annotation|extendedProperty|changedProperty|relatedColumnDetails)\b",
+    re.IGNORECASE,
 )
 
 
@@ -483,18 +480,18 @@ def _parse_column(block: str, description: str = "") -> Optional[Column]:
 
         is_hidden = _find_child(root, "isHidden") is not None
         fmt_node_calc = _find_child(root, "formatString")
-        format_string_calc = fmt_node_calc.value.strip().strip("'\"") if fmt_node_calc else ""
+        format_string_calc = _unquote(fmt_node_calc.value) if fmt_node_calc else ""
         sc_node_calc = _find_child(root, "sourceColumn")
-        source_column_calc = sc_node_calc.value.strip().strip("'\"") if sc_node_calc else ""
+        source_column_calc = _unquote(sc_node_calc.value) if sc_node_calc else ""
         sb_node_calc = _find_child(root, "summarizeBy")
-        summarize_by_calc = sb_node_calc.value.strip().strip("'\"") if sb_node_calc else ""
+        summarize_by_calc = _unquote(sb_node_calc.value) if sb_node_calc else ""
         sort_node_calc = _find_child(root, "sortByColumn")
-        sort_by_column_calc = sort_node_calc.value.strip().strip("'\"") if sort_node_calc else ""
+        sort_by_column_calc = _unquote(sort_node_calc.value) if sort_node_calc else ""
         dc_node_calc = _find_child(root, "dataCategory")
-        data_category_calc = dc_node_calc.value.strip().strip("'\"") if dc_node_calc else ""
+        data_category_calc = _unquote(dc_node_calc.value) if dc_node_calc else ""
         is_key_calc = _find_child(root, "isKey") is not None
         lt_node_calc = _find_child(root, "lineageTag")
-        lineage_tag_calc = lt_node_calc.value.strip().strip("'\"") if lt_node_calc else ""
+        lineage_tag_calc = _unquote(lt_node_calc.value) if lt_node_calc else ""
         return Column(name=name, data_type="calculated", is_calculated=True,
                       dax_expression=dax, is_hidden=is_hidden,
                       format_string=format_string_calc,
@@ -520,21 +517,21 @@ def _parse_column(block: str, description: str = "") -> Optional[Column]:
         root = TmdlNode(key="", children=children)
 
         dt_node = _find_child(root, "dataType")
-        data_type = dt_node.value if dt_node else "unknown"
+        data_type = _unquote(dt_node.value) if dt_node else "unknown"
         is_hidden = _find_child(root, "isHidden") is not None
         fmt_node_plain = _find_child(root, "formatString")
-        format_string_plain = fmt_node_plain.value.strip().strip("'\"") if fmt_node_plain else ""
+        format_string_plain = _unquote(fmt_node_plain.value) if fmt_node_plain else ""
         sc_node_plain = _find_child(root, "sourceColumn")
-        source_column_plain = sc_node_plain.value.strip().strip("'\"") if sc_node_plain else ""
+        source_column_plain = _unquote(sc_node_plain.value) if sc_node_plain else ""
         sb_node_plain = _find_child(root, "summarizeBy")
-        summarize_by_plain = sb_node_plain.value.strip().strip("'\"") if sb_node_plain else ""
+        summarize_by_plain = _unquote(sb_node_plain.value) if sb_node_plain else ""
         sort_node_plain = _find_child(root, "sortByColumn")
-        sort_by_column_plain = sort_node_plain.value.strip().strip("'\"") if sort_node_plain else ""
+        sort_by_column_plain = _unquote(sort_node_plain.value) if sort_node_plain else ""
         dc_node_plain = _find_child(root, "dataCategory")
-        data_category_plain = dc_node_plain.value.strip().strip("'\"") if dc_node_plain else ""
+        data_category_plain = _unquote(dc_node_plain.value) if dc_node_plain else ""
         is_key_plain = _find_child(root, "isKey") is not None
         lt_node_plain = _find_child(root, "lineageTag")
-        lineage_tag_plain = lt_node_plain.value.strip().strip("'\"") if lt_node_plain else ""
+        lineage_tag_plain = _unquote(lt_node_plain.value) if lt_node_plain else ""
         return Column(
             name=name,
             data_type=data_type,
@@ -589,7 +586,7 @@ def _parse_measure(block: str, leading_description: str = "") -> Optional[Measur
     dax_lines, in_dax = [], True
     for line in lines[1:]:
         s = line.strip()
-        if re.match(r"(formatString|displayFolder|lineageTag|isHidden|annotation|description):", s) or s == "isHidden":
+        if re.match(r"(formatString|displayFolder|lineageTag|isHidden|annotation|description):", s, re.IGNORECASE) or s.lower() == "ishidden":
             in_dax = False
         if in_dax:
             dax_lines.append(line)
@@ -602,13 +599,13 @@ def _parse_measure(block: str, leading_description: str = "") -> Optional[Measur
     hidden_node = _find_child(root, "isHidden")
     lineage_node = _find_child(root, "lineageTag")
 
-    display_folder = folder_node.value.strip().strip("'\"") if folder_node else ""
-    format_string = fmt_node.value.strip().strip("'\"") if fmt_node else ""
+    display_folder = _unquote(folder_node.value) if folder_node else ""
+    format_string = _unquote(fmt_node.value) if fmt_node else ""
     # Precedence: /// comment wins over description: property
-    prop_description = desc_node.value.strip().strip("'\"") if desc_node else ""
+    prop_description = _unquote(desc_node.value) if desc_node else ""
     description = leading_description if leading_description else prop_description
     is_hidden = hidden_node is not None
-    lineage_tag = lineage_node.value.strip().strip("'\"") if lineage_node else ""
+    lineage_tag = _unquote(lineage_node.value) if lineage_node else ""
 
     return Measure(
         name=name,
@@ -658,7 +655,8 @@ def _read_fenced_value(lines: list, start: int) -> tuple[str, int]:
 # scan stops at the first one (mirrors _parse_measure's property stop-list).
 _PROP_START_RE = re.compile(
     r"^(?:ordinal|expression|formatStringExpression|formatString|"
-    r"displayFolder|lineageTag|isHidden|annotation|description)\b"
+    r"displayFolder|lineageTag|isHidden|annotation|description)\b",
+    re.IGNORECASE,
 )
 
 
@@ -713,25 +711,25 @@ def _parse_calculation_items(content: str) -> list:
             if stripped == "```":
                 i += 1
                 continue
-            if stripped.startswith("ordinal"):
+            if stripped.lower().startswith("ordinal"):
                 try:
                     ordinal = int(_split_prop_value(stripped))
                 except ValueError:
                     pass
                 i += 1
-            elif stripped.startswith("expression"):
+            elif stripped.lower().startswith("expression"):
                 val = _split_prop_value(stripped)
                 if val.startswith("```"):
                     expr_prop, i = _read_fenced_value(lines, i + 1)
                 else:
                     expr_prop = val
                     i += 1
-            elif stripped.startswith("formatStringExpression"):
+            elif stripped.lower().startswith("formatstringexpression"):
                 val = _split_prop_value(stripped)
                 if val.startswith("```"):
                     fmt_expr, i = _read_fenced_value(lines, i + 1)
                 else:
-                    fmt_expr = val.strip().strip("'\"")
+                    fmt_expr = _unquote(val)
                     i += 1
             else:
                 i += 1
@@ -775,30 +773,44 @@ def _parse_calculation_items(content: str) -> list:
 
 def _strip_m_comments(content: str) -> str:
     """Remove /* ... */ block comments and // line comments.
-    Preserves // inside quoted strings (e.g., "https://...").
-    """
-    # Remove block comments first
-    content = re.sub(r"/\*[\s\S]*?\*/", "", content)
 
-    # Remove line comments: // not inside double quotes
-    lines = content.split("\n")
+    Preserves // and /* ... */ inside double-quoted strings (e.g.,
+    "https://..."). M escapes quotes by doubling them, so every '"'
+    toggles the string state and a doubled quote nets out; there is no
+    backslash escape rule. Block comments may span lines; string state
+    is per line. An unterminated block comment consumes the rest of the
+    text.
+    """
     result_lines = []
-    for line in lines:
+    in_block = False
+    for line in content.split("\n"):
         in_string = False
         new_line = []
         i = 0
         while i < len(line):
+            if in_block:
+                end = line.find("*/", i)
+                if end == -1:
+                    break
+                in_block = False
+                i = end + 2
+                continue
             char = line[i]
-            if char == '"' and (i == 0 or line[i-1] != '\\'):
+            if char == '"':
                 in_string = not in_string
                 new_line.append(char)
                 i += 1
                 continue
-            if not in_string and char == '/' and i + 1 < len(line) and line[i+1] == '/':
-                break
+            if not in_string and char == "/" and i + 1 < len(line):
+                if line[i + 1] == "/":
+                    break
+                if line[i + 1] == "*":
+                    in_block = True
+                    i += 2
+                    continue
             new_line.append(char)
             i += 1
-        result_lines.append(''.join(new_line))
+        result_lines.append("".join(new_line))
     return "\n".join(result_lines)
 
 
@@ -1315,13 +1327,13 @@ def _parse_table_file(filepath: str) -> Optional[Table]:
     lineage_tag = ""
     lt_node = _find_child(table_root, "lineageTag")
     if lt_node:
-        lineage_tag = lt_node.value.strip().strip("'\"")
+        lineage_tag = _unquote(lt_node.value)
 
     comment_map = _extract_leading_comments(content)
     description = comment_map.get(header_line, "")
 
-    qg = re.search(r"queryGroup:\s*'?([^'\n]+)'?", content)
-    query_group = qg.group(1).strip().strip("'\"") if qg else ""
+    qg = re.search(r"queryGroup:\s*'?([^'\n]+)'?", content, re.IGNORECASE)
+    query_group = _unquote(qg.group(1)) if qg else ""
 
     pt = re.search(
         r"^\s*partition\s+(?:'[^']*'|\"[^\"]*\"|\S+)\s*=\s*(\w+)",
@@ -1442,8 +1454,8 @@ def _parse_relationships(filepath: str) -> list:
         # Add tree lookups for crossFilteringBehavior and securityFilteringBehavior
         cfb_node = _find_child(root, "crossFilteringBehavior")
         sfb_node = _find_child(root, "securityFilteringBehavior")
-        cross_filtering = cfb_node.value.strip().strip("'\"") if cfb_node else "oneDirection"
-        security_filtering = sfb_node.value.strip().strip("'\"") if sfb_node else "oneDirection"
+        cross_filtering = _unquote(cfb_node.value) if cfb_node else "oneDirection"
+        security_filtering = _unquote(sfb_node.value) if sfb_node else "oneDirection"
 
         from_table, from_column = _split_table_column(from_node.value.strip())
         to_table, to_column = _split_table_column(to_node.value.strip())
@@ -1574,7 +1586,7 @@ def _parse_functions(filepath: str) -> list:
             dax_lines = []
             for line in lines[1:]:
                 s = line.strip()
-                if re.match(r"(formatString|displayFolder|lineageTag|isHidden|annotation|description):", s) or s == "isHidden":
+                if re.match(r"(formatString|displayFolder|lineageTag|isHidden|annotation|description):", s, re.IGNORECASE) or s.lower() == "ishidden":
                     break
                 dax_lines.append(line)
             expression = "\n".join(dax_lines).strip().rstrip("`").strip()
@@ -1613,10 +1625,10 @@ def _parse_model_database(definition_path: str) -> tuple[str, str, str]:
         root = TmdlNode(key="", children=children)
         culture_node = _find_child(root, "culture")
         if culture_node:
-            culture = culture_node.value.strip().strip("'\"")
+            culture = _unquote(culture_node.value)
         version_node = _find_child(root, "defaultPowerBIDataSourceVersion")
         if version_node:
-            data_source_version = version_node.value.strip().strip("'\"")
+            data_source_version = _unquote(version_node.value)
 
     database_file = os.path.join(definition_path, "database.tmdl")
     if os.path.exists(database_file):
@@ -1627,7 +1639,7 @@ def _parse_model_database(definition_path: str) -> tuple[str, str, str]:
         root = TmdlNode(key="", children=children)
         compat_node = _find_child(root, "compatibilityLevel")
         if compat_node:
-            compatibility_level = compat_node.value.strip().strip("'\"")
+            compatibility_level = _unquote(compat_node.value)
 
     return culture, data_source_version, compatibility_level
 
@@ -1661,9 +1673,9 @@ def _is_function_expression(block: str) -> bool:
 def _classify_expression(block: str, name: str) -> SourceExpression:
     expr = SourceExpression(name=name, raw_m=block)
 
-    qg = re.search(r"queryGroup:\s*'?([^'\n]+)'?", block)
+    qg = re.search(r"queryGroup:\s*'?([^'\n]+)'?", block, re.IGNORECASE)
     if qg:
-        expr.query_group = qg.group(1).strip().strip("'\"")
+        expr.query_group = _unquote(qg.group(1))
 
     if "IsParameterQuery=true" in block or "IsParameterQuery = true" in block:
         expr.source_type = "parameter"

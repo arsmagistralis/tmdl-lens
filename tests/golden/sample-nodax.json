@@ -17,14 +17,7 @@
       "kind": "measures_only",
       "is_hidden": false,
       "description": null,
-      "source": {
-        "resolved": true,
-        "type": "embedded",
-        "connector": null,
-        "details": {},
-        "physical_tables": [],
-        "chain": []
-      },
+      "source": null,
       "expression": null,
       "columns": [],
       "measures": [

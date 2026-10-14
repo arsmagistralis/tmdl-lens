@@ -4,6 +4,7 @@ from tmdl_lens.tmdl_parser import (
     SourceExpression,
     _classify_expression,
     _classify_m_content,
+    _classify_table,
     _dedent,
     _extract_blocks,
     _extract_connector_details,
@@ -38,6 +39,26 @@ def test_strip_block_comments():
     content = "let\n    /* multi\n       line */\n    x = 1\nin x"
     result = _strip_m_comments(content)
     assert "multi" not in result
+    assert "x = 1" in result
+
+
+def test_strip_line_comment_after_string_ending_in_backslash():
+    content = 'let\n    p = "C:\\dir\\" // trailing\nin\n    p'
+    result = _strip_m_comments(content)
+    assert "trailing" not in result
+    assert '"C:\\dir\\"' in result
+
+
+def test_strip_preserves_block_comment_in_string():
+    content = 'let\n    p = "a /* not a comment */ b",\n    x = 1\nin\n    x'
+    result = _strip_m_comments(content)
+    assert "/* not a comment */" in result
+
+
+def test_strip_block_comment_with_quotes_and_slashes():
+    content = 'let\n    /* "quoted" and // line */\n    x = 1\nin x'
+    result = _strip_m_comments(content)
+    assert "quoted" not in result
     assert "x = 1" in result
 
 
@@ -148,6 +169,17 @@ def test_classify_derived_bare_table():
 def test_classify_unresolved():
     expr = _classify_m_content("let x = SomeUnknownThing(y) in x", "t")
     assert expr.source_type == "unknown"
+
+
+def test_classify_table_name_never_gives_content_types():
+    m_content = "partition p = m\n\tsource = let x = 1 in x"
+    assert _classify_table("measurement-log", "m", m_content) == "other"
+    assert _classify_table("price-selector", "m", m_content) == "other"
+    assert _classify_table("calc-areas", "m", m_content) == "other"
+    assert _classify_table("fact-sales", "m", m_content) == "fact"
+    assert _classify_table("t", "m", "calculationGroup") == "calc_group"
+    assert _classify_table("t", "calculated", "NAMEOF('t'[c])") == "field_parameter"
+    assert _classify_table("t", "", "table t\n\tmeasure m = SUM(x)") == "measures_only"
 
 
 def test_connector_details_sql_native_query():
@@ -376,6 +408,27 @@ def test_parse_measure_quoted_name_unchanged():
     assert m.format_string == "#,0"
 
 
+def test_parse_measure_case_insensitive_property_stop():
+    block = (
+        "measure Revenues =\n"
+        "\tSUM('fact-sales'[amount])\n"
+        "\tFormatString: #,0\n"
+        "\tLineageTag: abc-123"
+    )
+    m = _parse_measure(block)
+    assert m is not None
+    assert m.format_string == "#,0"
+    assert m.lineage_tag == "abc-123"
+    assert "FormatString" not in m.dax_expression
+
+
+def test_parse_measure_format_string_doubled_quotes():
+    block = 'measure M = SUM(x)\n\tformatString: "0.0 ""x"""'
+    m = _parse_measure(block)
+    assert m is not None
+    assert m.format_string == '0.0 "x"'
+
+
 def test_classify_first_binding_alias_quoted():
     expr = _classify_m_content(
         'let\n'
@@ -548,6 +601,23 @@ def test_relationship_both_sides_quoted(tmp_path):
     assert rel.to_column == "product id"
 
 
+def test_relationship_case_insensitive_column_keys(tmp_path):
+    content = (
+        "relationship r1\n"
+        "\tFromColumn: fact-sales.order_id\n"
+        "\tToColumn: 'dim-product'.product_id\n"
+    )
+    path = tmp_path / "relationships.tmdl"
+    path.write_text(content, encoding="utf-8")
+    rels = _parse_relationships(str(path))
+    assert len(rels) == 1
+    rel = rels[0]
+    assert rel.from_table == "fact-sales"
+    assert rel.from_column == "order_id"
+    assert rel.to_table == "dim-product"
+    assert rel.to_column == "product_id"
+
+
 def test_parse_column_quoted_escaped_name_plain():
     block = (
         "column 'Rep''s Col'\n"
@@ -557,6 +627,12 @@ def test_parse_column_quoted_escaped_name_plain():
     assert col is not None
     assert col.name == "Rep's Col"
     assert col.is_calculated is False
+
+
+def test_parse_column_case_insensitive_data_type():
+    col = _parse_column("column 'X'\n\tDataType: int64")
+    assert col is not None
+    assert col.data_type == "int64"
 
 
 def test_parse_column_quoted_escaped_name_calc():

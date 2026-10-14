@@ -1,4 +1,4 @@
-// Measures table - no partition/source, DAX measures only
+// Measures table - no source, DAX measures only
 // Parser must detect this as a measures-only table
 table _measures
 	lineageTag: 00000002-0000-0000-0000-000000000006
@@ -21,13 +21,5 @@ table _measures
 		isHidden
 		lineageTag: 00000004-0000-0000-0000-000000000004
 		formatString: #,##0.00
-
-	partition _measures = m
-		mode: import
-		source =
-				let
-				    Source = Table.FromRows({}, type table)
-				in
-				    Source
 
 	annotation PBI_NavigationStepName = Navigation
