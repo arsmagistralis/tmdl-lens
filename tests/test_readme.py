@@ -20,6 +20,7 @@ from tmdl_lens.tmdl_parser import (
     Table,
     TableFilter,
     UserFunction,
+    _classify_m_content,
 )
 
 
@@ -143,6 +144,29 @@ def test_html_detail_fields_match_markdown(sample_model, gen_config):
     assert "<strong>Entity:</strong>" in html
     assert "<strong>Detail:</strong>" not in html
     assert "<code>dbo.orders</code>" in html
+
+
+def test_sharepoint_contents_detail_fields():
+    table = Table(
+        name="sp-site",
+        table_type="fact",
+        partition_type="m",
+        inline_source=_classify_m_content(
+            'let\n'
+            '    Source = SharePoint.Contents("https://contoso.sharepoint.com/sites/examples")\n'
+            'in\n'
+            '    Source',
+            "sp-site",
+        ),
+    )
+    model = SemanticModel(report_name="T", tables=[table])
+    resolved = resolve_sources(model.source_expressions, model.m_parameters, tables=model.tables)
+    readme = generate_readme(model, resolved, {"report_name": "T", "include_dax": True})
+    html = generate_html(model, resolved, {"report_name": "T", "include_dax": True})
+    row = next(line for line in readme.split("\n") if line.startswith("| `sp-site`"))
+    assert "SharePoint Contents -> https://contoso.sharepoint.com/sites/examples" in row
+    assert "**SharePoint URL:** `https://contoso.sharepoint.com/sites/examples`" in readme
+    assert "<strong>SharePoint URL:</strong>" in html
 
 
 def test_measure_inventory_counts_match_measures_section(sample_model, sample_resolved, gen_config):

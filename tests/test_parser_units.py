@@ -188,6 +188,31 @@ def test_connector_details_odbc():
     assert expr.dsn == "dsn=MyDSN"
 
 
+def test_connector_details_sharepoint_contents():
+    expr = SourceExpression(
+        name="t", source_type="connector",
+        connector_namespace="SharePoint", connector_function="Contents",
+    )
+    _extract_connector_details(
+        expr,
+        'SharePoint.Contents("https://contoso.sharepoint.com/sites/examples", [ApiVersion = 15])',
+        "SharePoint", "Contents",
+    )
+    assert expr.sharepoint_url == "https://contoso.sharepoint.com/sites/examples"
+    assert expr.table_or_view == ""
+    assert expr.file_name == ""
+    assert expr.sheet_name == ""
+
+
+def test_connector_details_sharepoint_contents_bare_param():
+    expr = SourceExpression(
+        name="t", source_type="connector",
+        connector_namespace="SharePoint", connector_function="Contents",
+    )
+    _extract_connector_details(expr, "SharePoint.Contents(SiteUrl)", "SharePoint", "Contents")
+    assert expr.sharepoint_url == "[param:SiteUrl]"
+
+
 def test_connector_details_navigation_fallback():
     expr = SourceExpression(
         name="t", source_type="connector",

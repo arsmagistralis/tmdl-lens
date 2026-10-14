@@ -103,6 +103,7 @@ CONNECTOR_TYPE_LABEL = {
     ("Odbc", "DataSource"):               "ODBC",
     ("SharePoint", "Files"):              "SharePoint Files",
     ("SharePoint", "Tables"):             "SharePoint List",
+    ("SharePoint", "Contents"):           "SharePoint Contents",
     ("Excel", "Workbook"):                "Excel",
     ("Csv", "Document"):                  "CSV (local)",
     ("Web", "Contents"):                  "Web API",
@@ -183,6 +184,9 @@ def _build_label(expr: SourceExpression, params: dict[str, str]) -> str:
         if (ns, func) == ("SharePoint", "Tables"):
             lst = f" -> {expr.table_or_view}" if expr.table_or_view else ""
             return f"SharePoint List -> {expr.sharepoint_url}{lst}"
+
+        if (ns, func) == ("SharePoint", "Contents"):
+            return f"SharePoint Contents -> {expr.sharepoint_url}"
 
         # 7. Excel (SharePoint)
         if (ns, func) == ("Excel", "Workbook"):

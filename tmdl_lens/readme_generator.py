@@ -740,7 +740,7 @@ def _source_detail_fields(rs: ResolvedSource) -> list:
             fields.append(("Container", f"`{rs.container}`"))
     if rs.source_type == "connector" and rs.connector_namespace == "Odbc" and rs.connector_function == "DataSource" and rs.dsn:
         fields.append(("DSN", f"`{rs.dsn}`"))
-    if rs.source_type == "connector" and rs.connector_namespace == "SharePoint" and rs.connector_function in ("Files", "Tables") and rs.sharepoint_url:
+    if rs.source_type == "connector" and rs.connector_namespace == "SharePoint" and rs.connector_function in ("Files", "Tables", "Contents") and rs.sharepoint_url:
         fields.append(("SharePoint URL", f"`{rs.sharepoint_url}`"))
     if rs.source_type == "connector" and (
         (rs.connector_namespace == "Excel" and rs.connector_function == "Workbook")

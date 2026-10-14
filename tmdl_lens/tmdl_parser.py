@@ -1163,6 +1163,11 @@ def _extract_connector_details(expr: SourceExpression, clean: str, namespace: st
             if lst:
                 expr.table_or_view = lst.group(1)
 
+    elif namespace == "SharePoint" and function == "Contents":
+        quoted_pattern = r'SharePoint\.Contents\s*\(\s*"([^"]+)"'
+        bare_pattern = r'SharePoint\.Contents\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)'
+        expr.sharepoint_url = _extract_string_or_param_arg(clean, quoted_pattern, bare_pattern) or ""
+
     elif namespace == "Excel" and function == "Workbook":
         quoted_pattern = r'File\.Contents\s*\(\s*"([^"]+)"'
         bare_pattern = r'File\.Contents\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)'
