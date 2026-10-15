@@ -5,4 +5,4 @@ Imported by the GUI (app.py) and the CLI (cli.py); also read by
 setuptools via the dynamic version attribute in pyproject.toml.
 """
 
-__version__ = "0.7.0"  # x-release-please-version
+__version__ = "0.7.1"  # x-release-please-version
