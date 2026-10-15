@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.1](https://github.com/nox-magistralis/tmdl-lens/compare/v0.7.0...v0.7.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* bug-report remediation - parser, sources, CLI output and statistics ([8eeb0ce](https://github.com/nox-magistralis/tmdl-lens/commit/8eeb0ce06737177049baf99b5398a1cf1f2721d4))
+* **cli:** name reports, split streams and count skips in summary ([a8b8fcf](https://github.com/nox-magistralis/tmdl-lens/commit/a8b8fcfbf58b65ac4823c31258f8c0da44f9397c))
+* **generator:** align statistics table with summary and add Columns ([6563292](https://github.com/nox-magistralis/tmdl-lens/commit/6563292be743605c8cb29dc06de07535e52eb394))
+* **generator:** find hidden references in permissive DAX shapes ([ff05d57](https://github.com/nox-magistralis/tmdl-lens/commit/ff05d57012cb67bb490a0021c34eeb56775707ba))
+* **parser:** table typing, M comments, key case and value unquoting ([7ed7902](https://github.com/nox-magistralis/tmdl-lens/commit/7ed79025a238f0bb9f0f45084ede488cb1aa7aa4))
+* **sources:** keep the site URL for SharePoint.Contents sources ([d9ea6a2](https://github.com/nox-magistralis/tmdl-lens/commit/d9ea6a2e161a53b656b2b6349466f2ca4633a6fa))
+
 ## [0.7.0](https://github.com/nox-magistralis/tmdl-lens/compare/v0.6.1...v0.7.0) (2026-10-13)
 
 
