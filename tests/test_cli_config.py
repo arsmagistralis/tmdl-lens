@@ -40,7 +40,9 @@ def test_unreadable_config_errors_and_is_untouched(tmp_path, capsys, content):
     rc = main(["--config", str(cfg), "--reports-folder", str(tmp_path)])
     assert rc == 2
     assert cfg.read_bytes() == content
-    assert str(cfg) in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert str(cfg) in captured.err
+    assert str(cfg) not in captured.out
 
 
 def test_missing_config_warns_and_creates_nothing(tmp_path, capsys):
@@ -50,7 +52,7 @@ def test_missing_config_warns_and_creates_nothing(tmp_path, capsys):
     rc = main(["--config", str(cfg), "--reports-folder", str(reports)])
     assert rc == 0
     assert not cfg.exists()
-    assert str(cfg) in capsys.readouterr().out
+    assert str(cfg) in capsys.readouterr().err
 
 
 def test_write_back_preserves_settings_and_merges_hashes(tmp_path):
@@ -115,9 +117,9 @@ def test_wrong_typed_value_is_warned_replaced_and_kept_in_file(tmp_path, capsys)
     _write_config(cfg, {"output_format": "md", "include_dax": "yes", "skip_unchanged": "no"})
     rc = main(["--config", str(cfg), "--reports-folder", str(reports)])
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "config key 'include_dax' has invalid value \"yes\", using true" in out
-    assert "config key 'skip_unchanged' has invalid value \"no\", using false" in out
+    err = capsys.readouterr().err
+    assert "config key 'include_dax' has invalid value \"yes\", using true" in err
+    assert "config key 'skip_unchanged' has invalid value \"no\", using false" in err
     assert (reports / "README.md").exists()
     saved = json.loads(cfg.read_text(encoding="utf-8"))
     assert saved["include_dax"] == "yes"

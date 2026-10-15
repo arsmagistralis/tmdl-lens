@@ -128,7 +128,7 @@ def main(argv=None) -> int:
     def log(msg: str, level: str = "msg") -> None:
         if args.quiet and level in ("msg", "info"):
             return
-        print(msg)
+        print(msg, file=sys.stderr if level in ("warn", "err") else sys.stdout)
 
     cfg_path = args.config
     config_loaded = False

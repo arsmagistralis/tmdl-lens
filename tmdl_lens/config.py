@@ -290,12 +290,6 @@ def validate_config(config: dict) -> list:
     reports_folder = str(config.get("reports_folder", "")).strip()
     if not reports_folder:
         warnings.append("reports_folder is not set - choose a reports folder to run")
-    elif not os.path.isdir(reports_folder):
-        warnings.append(f"reports_folder does not exist: {reports_folder}")
-
-    output_folder = str(config.get("output_folder", "")).strip()
-    if output_folder and not os.path.isdir(output_folder):
-        warnings.append(f"output_folder does not exist: {output_folder}")
 
     watch_debounce = config.get("watch_debounce")
     if watch_debounce is not None:

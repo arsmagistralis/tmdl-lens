@@ -49,18 +49,13 @@ def test_empty_reports_folder_warns():
     assert any("reports_folder" in w for w in warnings)
 
 
-def test_missing_reports_folder_warns(tmp_path):
-    missing = str(tmp_path / "does-not-exist")
-    warnings = validate_config({"reports_folder": missing})
-    assert any("does not exist" in w for w in warnings)
-
-
-def test_missing_output_folder_warns(tmp_path):
+def test_missing_paths_do_not_warn(tmp_path):
     warnings = validate_config({
-        "reports_folder": str(tmp_path),
-        "output_folder":  str(tmp_path / "does-not-exist"),
+        "reports_folder": str(tmp_path / "absent-reports"),
+        "output_folder":  str(tmp_path / "absent-out"),
+        "output_format":  "md",
     })
-    assert any("output_folder" in w for w in warnings)
+    assert warnings == []
 
 
 def test_watch_debounce_out_of_range_warns():

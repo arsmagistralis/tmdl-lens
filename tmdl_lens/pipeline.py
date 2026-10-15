@@ -299,7 +299,7 @@ class Pipeline:
                     "err",
                 )
 
-        self.logger(f"found {len(processable)} report(s)", "ok")
+        self.logger(f"found {len(processable)} report(s)", "msg")
 
         result = PipelineResult(total_count=len(runnable))
         for pbip_path in processable:
@@ -316,9 +316,9 @@ class Pipeline:
         result.error_count += sum(len(ps) for ps in collisions.values())
 
         self.logger(
-            f"done - {result.success_count} written" + (
-                f" - {result.error_count} errors" if result.error_count else ""
-            ),
+            f"done - {result.success_count} written"
+            + (f" - {result.skipped_count} skipped" if result.skipped_count else "")
+            + (f" - {result.error_count} errors" if result.error_count else ""),
             "ok" if not result.error_count else "warn",
         )
         return result
@@ -396,7 +396,7 @@ class Pipeline:
                 f.write(content)
 
             out_filename = os.path.basename(out_path)
-            self.logger(f"  {out_filename} written", "ok")
+            self.logger(f"{pbip_name} - {out_filename} written", "msg")
             return SingleResult(
                 report_name=pbip_name,
                 success=True,
@@ -408,6 +408,6 @@ class Pipeline:
             )
 
         except Exception as e:
-            self.logger(f"  error: {e}", "err")
+            self.logger(f"{pbip_name} - error: {e}", "err")
             return SingleResult(report_name=pbip_name, error=str(e),
                                 hash_key=hash_key)
