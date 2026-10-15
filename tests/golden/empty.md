@@ -96,6 +96,7 @@ This model contains 0 loaded tables, 0 measures, 0 relationships.
 | Relationships | 0 | - |
 | Measures | 0 | - |
 | Calculated Columns | 0 | - |
+| Columns | 0 | - |
 
 ---
 

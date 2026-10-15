@@ -197,7 +197,7 @@ COUNTROWS(Sales)
 
 | Category | Count | Items |
 |---|---|---|
-| Loaded Tables | 1 | `Sales` |
+| Loaded Tables | 2 | `Sales`, `Lookup` |
 | Hidden Tables | 1 | `Lookup` |
 | Calculated Tables | 0 | - |
 | Field Parameters | 0 | - |
@@ -207,6 +207,7 @@ COUNTROWS(Sales)
 | Relationships | 1 | - |
 | Measures | 3 | - |
 | Calculated Columns | 0 | - |
+| Columns | 4 | - |
 
 ---
 

@@ -227,7 +227,7 @@ Use tmdl-lens to provide a manual label for each.
 
 | Category | Count | Items |
 |---|---|---|
-| Loaded Tables | 6 | `Orders`, `Customers`, `AllOrders`, `Calendar`, `Broken`, `Odd "Q" [x] <y>` |
+| Loaded Tables | 7 | `Orders`, `Customers`, `AllOrders`, `Calendar`, `Broken`, `Secret`, `Odd "Q" [x] <y>` |
 | Hidden Tables | 1 | `Secret` |
 | Calculated Tables | 0 | - |
 | Field Parameters | 0 | - |
@@ -237,6 +237,7 @@ Use tmdl-lens to provide a manual label for each.
 | Relationships | 0 | - |
 | Measures | 1 | - |
 | Calculated Columns | 0 | - |
+| Columns | 0 | - |
 
 ---
 

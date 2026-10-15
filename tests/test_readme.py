@@ -2,6 +2,8 @@
 test_readme.py - pytest tests for the Markdown/HTML generators.
 """
 
+import re
+
 from tmdl_lens.readme_generator import (
     _build_function_usage_map,
     _esc,
@@ -315,3 +317,37 @@ def test_generation_is_deterministic(sample_model, sample_resolved, gen_config):
     second_html = generate_html(sample_model, sample_resolved, gen_config)
     assert first_md.encode("utf-8") == second_md.encode("utf-8")
     assert first_html.encode("utf-8") == second_html.encode("utf-8")
+
+
+def _statistics_counts(markup, html_mode):
+    if html_mode:
+        stats = markup.split('<h2 id="statistics">', 1)[1]
+        loaded = re.search(r"<td>Loaded Tables</td><td>(\d+)</td>", stats)
+        columns = re.search(r"<td>Columns</td><td>(\d+)</td>", stats)
+        items = re.search(r"<td>Loaded Tables</td><td>\d+</td><td>(.*?)</td></tr>", stats)
+        names = re.findall(r"<code>(.*?)</code>", items.group(1))
+    else:
+        stats = markup.split("## 8. Model Statistics", 1)[1]
+        loaded = re.search(r"^\| Loaded Tables \| (\d+) \|", stats, re.MULTILINE)
+        columns = re.search(r"^\| Columns \| (\d+) \|", stats, re.MULTILINE)
+        items = re.search(r"^\| Loaded Tables \| \d+ \| (.+) \|$", stats, re.MULTILINE)
+        names = re.findall(r"`(.*?)`", items.group(1))
+    return int(loaded.group(1)), int(columns.group(1)), names
+
+
+def test_statistics_agrees_with_summary(sample_model, sample_resolved, gen_config):
+    summary_loaded = int(
+        re.search(r"This model contains (\d+) loaded table", generate_readme(
+            sample_model, sample_resolved, gen_config)).group(1)
+    )
+    tables_by_name = {t.name: t for t in sample_model.tables}
+    for markup, html_mode in (
+        (generate_readme(sample_model, sample_resolved, gen_config), False),
+        (generate_html(sample_model, sample_resolved, gen_config), True),
+    ):
+        loaded_count, columns_count, item_names = _statistics_counts(markup, html_mode)
+        assert loaded_count == summary_loaded
+        assert loaded_count == len(item_names)
+        assert columns_count == sum(
+            len(tables_by_name[name].columns) for name in item_names
+        )

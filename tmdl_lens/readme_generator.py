@@ -377,6 +377,7 @@ def _statistics_rows(
     calc, fp, mo, cg = _support_split(support_tables)
     measure_count = sum(len(t.measures) for t in model.tables)
     calc_col_count = sum(1 for t in model.tables for c in t.columns if c.is_calculated)
+    column_count = sum(len(t.columns) for t in loaded_tables)
 
     def names(tables):
         return _CodeList(tuple(t.name for t in tables))
@@ -392,6 +393,7 @@ def _statistics_rows(
         ("Relationships",        str(len(_visible_relationships(model))), "-"),
         ("Measures",             str(measure_count),       "-"),
         ("Calculated Columns",   str(calc_col_count),      "-"),
+        ("Columns",              str(column_count),        "-"),
     ]
 
 
@@ -1658,7 +1660,7 @@ def _html_unresolved(ctx: _HtmlContext) -> list[str]:
 
 def _html_statistics(ctx: _HtmlContext) -> list[str]:
     c = ctx.collected
-    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    rows = _statistics_rows(ctx.model, c["loaded"], c["support"], c["staging"], c["hidden_tables"])
     return [
         _html_heading("statistics"),
         _html_table(["Category", "Count", "Items"], _html_rows(rows)),
@@ -1738,7 +1740,6 @@ def generate_readme(
     loaded = collected["loaded"]
     support = collected["support"]
     staging = collected["staging"]
-    loaded_visible = collected["loaded_visible"]
 
     ref_tables, ref_measures, ref_columns = _build_hidden_reference_map(model)
     lineage = _lineage_section(collected, resolved, model) if config.get("include_lineage", False) else ""
@@ -1753,7 +1754,7 @@ def generate_readme(
         "security_roles": lambda: _security_roles_section(model),
         "m_parameters":   lambda: _m_parameters_section(model),
         "unresolved":     lambda: _unresolved_section(resolved),
-        "statistics":     lambda: _statistics_section(model, loaded_visible, support, staging, collected["hidden_tables"]),
+        "statistics":     lambda: _statistics_section(model, loaded, support, staging, collected["hidden_tables"]),
     }
 
     sections = [f"# {report_name}\n", _md_contents(resolved)]
@@ -2065,7 +2066,7 @@ def _text_unresolved(ctx: _TextContext) -> list[list[str]]:
 
 def _text_statistics(ctx: _TextContext) -> list[list[str]]:
     c = ctx.collected
-    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    rows = _statistics_rows(ctx.model, c["loaded"], c["support"], c["staging"], c["hidden_tables"])
     return [_text_heading("statistics"), _text_table(["Category", "Count", "Items"], rows)]
 
 
