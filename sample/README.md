@@ -421,7 +421,7 @@ Use tmdl-lens to provide a manual label for each.
 
 | Category | Count | Items |
 |---|---|---|
-| Loaded Tables | 2 | `dim-product`, `fact-sales` |
+| Loaded Tables | 3 | `dim-product`, `fact-sales`, `helper-order-lookup` |
 | Hidden Tables | 1 | `helper-order-lookup` |
 | Calculated Tables | 1 | `dim-date` |
 | Field Parameters | 1 | `param-metric-selector` |
@@ -431,6 +431,7 @@ Use tmdl-lens to provide a manual label for each.
 | Relationships | 3 | - |
 | Measures | 7 | - |
 | Calculated Columns | 2 | - |
+| Columns | 12 | - |
 
 ---
 

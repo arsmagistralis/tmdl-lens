@@ -377,6 +377,7 @@ def _statistics_rows(
     calc, fp, mo, cg = _support_split(support_tables)
     measure_count = sum(len(t.measures) for t in model.tables)
     calc_col_count = sum(1 for t in model.tables for c in t.columns if c.is_calculated)
+    column_count = sum(len(t.columns) for t in loaded_tables)
 
     def names(tables):
         return _CodeList(tuple(t.name for t in tables))
@@ -392,6 +393,7 @@ def _statistics_rows(
         ("Relationships",        str(len(_visible_relationships(model))), "-"),
         ("Measures",             str(measure_count),       "-"),
         ("Calculated Columns",   str(calc_col_count),      "-"),
+        ("Columns",              str(column_count),        "-"),
     ]
 
 
@@ -740,7 +742,7 @@ def _source_detail_fields(rs: ResolvedSource) -> list:
             fields.append(("Container", f"`{rs.container}`"))
     if rs.source_type == "connector" and rs.connector_namespace == "Odbc" and rs.connector_function == "DataSource" and rs.dsn:
         fields.append(("DSN", f"`{rs.dsn}`"))
-    if rs.source_type == "connector" and rs.connector_namespace == "SharePoint" and rs.connector_function in ("Files", "Tables") and rs.sharepoint_url:
+    if rs.source_type == "connector" and rs.connector_namespace == "SharePoint" and rs.connector_function in ("Files", "Tables", "Contents") and rs.sharepoint_url:
         fields.append(("SharePoint URL", f"`{rs.sharepoint_url}`"))
     if rs.source_type == "connector" and (
         (rs.connector_namespace == "Excel" and rs.connector_function == "Workbook")
@@ -1098,6 +1100,54 @@ def _build_hidden_reference_map(model: SemanticModel) -> tuple[dict, dict, dict]
     return tables_by_name, hidden_measures, hidden_columns
 
 
+_REF_PATTERN = re.compile(r"(?:'([^']+)'|([A-Za-z0-9_.]+))?(\s*)\[([^\[\]]+)\]")
+
+
+def _blank_strings_and_comments(dax: str) -> str:
+    """Blank DAX string contents and comments with spaces.
+
+    One left-to-right scan recognises code, string, line comment and block
+    comment states.  String contents (quotes included) and comment text
+    (markers included) are replaced with spaces so no reference can come
+    from either.  In string state `""` is an escaped quote and an
+    unterminated string consumes the rest.  In comment state quotes and
+    comment markers are comment text: a line comment ends at the newline, a
+    block comment at `*/`, an unterminated block comment consumes the rest.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(dax)
+    while i < n:
+        ch = dax[i]
+        nxt = dax[i + 1 : i + 2]
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if dax[j] == '"':
+                    if j + 1 < n and dax[j + 1] == '"':
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(" " * (j - i))
+            i = j
+            continue
+        if (ch == "/" and nxt in ("/", "*")) or (ch == "-" and nxt == "-"):
+            if nxt == "*":
+                j = dax.find("*/", i + 2)
+                j = n if j == -1 else j + 2
+            else:
+                j = dax.find("\n", i)
+                j = n if j == -1 else j
+            out.append(" " * (j - i))
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _find_hidden_references(
     dax_expression: str,
     tables_by_name: dict,
@@ -1106,94 +1156,62 @@ def _find_hidden_references(
 ) -> list[tuple[str, str]]:
     """Scan a single DAX expression for references to hidden objects.
 
-    Returns a list of (display_name, owning_table) tuples, de-duplicated,
-    in encounter order.  Skips references that are ambiguous (same bare
-    measure name on multiple tables) rather than guessing.
+    Returns a list of (display_name, owning_table) tuples, de-duplicated:
+    column references in text order first, then bare measure references in
+    text order.  Skips references that are ambiguous (same bare measure
+    name on multiple tables) rather than guessing.
+
+    String literals and DAX comments are blanked before scanning, so text
+    inside them never produces a reference.  Bracket names accept any
+    characters except brackets.  A quoted or bare table prefix may be
+    separated from the bracket by whitespace.  A prefix that names a known
+    table makes the bracket a column reference; an unknown quoted prefix is
+    ignored; an unknown bare prefix is ignored when it touches the bracket
+    and falls back to a bare measure reference when whitespace separates
+    them, because the text before the bracket is then code such as RETURN,
+    not a table name.
     """
-    dax = dax_expression
+    stripped = _blank_strings_and_comments(dax_expression)
 
-    # Strip content inside double-quoted string literals to avoid false
-    # matches on bracket characters inside literal strings.
-    # Replace string contents with spaces (preserving length) so positions
-    # of non-string tokens are unchanged relative to the original.
-    cleaned = []
-    i = 0
-    while i < len(dax):
-        if dax[i] == '"':
-            j = i + 1
-            while j < len(dax):
-                if dax[j] == '"':
-                    j += 1
-                    break
-                j += 1
-            # Replace string content (including quotes) with spaces
-            cleaned.append(" " * (j - i))
-            i = j
-        else:
-            cleaned.append(dax[i])
-            i += 1
-    stripped = "".join(cleaned)
-
-    results: list[tuple[str, str]] = []
+    column_refs: list[tuple[str, str]] = []
+    measure_refs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
-    # Pattern 1: Column references - 'TableName'[ColumnName] or TableName[ColumnName]
-    # Matches optional single-quoted or bare table name, then [ColumnName]
-    col_pattern = re.compile(
-        r"(?:'([^']+)'|([A-Za-z_]\w*)) \[ ([A-Za-z_][A-Za-z0-9_. ]*) \]",
-        re.VERBOSE,
-    )
-    for m in col_pattern.finditer(stripped):
-        table_name = m.group(1) if m.group(1) else m.group(2)
-        col_name = m.group(3).strip()
-        # Verify the reference points to a real hidden object
-        tbl = tables_by_name.get(table_name)
-        if tbl is None:
-            continue
-        is_hidden_ref = False
-        if tbl.is_hidden:
-            is_hidden_ref = True
-        elif (table_name, col_name) in hidden_columns:
-            is_hidden_ref = True
-        if is_hidden_ref:
-            display = f"{table_name}[{col_name}]"
-            key = (display, table_name)
-            if key not in seen:
-                seen.add(key)
-                results.append(key)
-
-    # Pattern 2: Bare measure references - [MeasureName]
-    # Must NOT be preceded by a table name (closing quote, letter, or ])
-    # Find all [MeasureName] tokens via regex
-    meas_pattern = re.compile(r"\[ ([A-Za-z_][A-Za-z0-9_. ()+-]*) \]", re.VERBOSE)
-    for m in meas_pattern.finditer(stripped):
-        start = m.start()
-        # Check that this is a bare reference - not preceded by a closing
-        # single-quote, closing double-quote, or alphanumeric character
-        # (which would indicate a table-qualified column reference).
-        if start > 0:
-            prev_char = stripped[start - 1]
-            if prev_char not in (" ", "\t", "\n", "\r", "(", ",", "=", "+", "-", "*", "/", ">", "<", "!", "&", "|", "~", "^", "%"):
-                # This bracket is attached to something - could be table[col]
-                # already caught by Pattern 1, or part of another syntax.
-                # Skip it.
-                continue
-        meas_name = m.group(1).strip()
-        if meas_name not in hidden_measures:
-            continue
-        entry = hidden_measures[meas_name]
-        if isinstance(entry, list):
-            # Ambiguous - multiple tables have a hidden measure with this name.
-            # Skip rather than guessing.
-            continue
-        table_name = entry
-        display = f"[{meas_name}]"
-        key = (display, table_name)
+    def add_column(table_name: str, col_name: str) -> None:
+        table = tables_by_name[table_name]
+        if not table.is_hidden and (table_name, col_name) not in hidden_columns:
+            return
+        key = (f"{table_name}[{col_name}]", table_name)
         if key not in seen:
             seen.add(key)
-            results.append(key)
+            column_refs.append(key)
 
-    return results
+    def add_measure(meas_name: str) -> None:
+        entry = hidden_measures.get(meas_name)
+        if entry is None or isinstance(entry, list):
+            return
+        key = (f"[{meas_name}]", entry)
+        if key not in seen:
+            seen.add(key)
+            measure_refs.append(key)
+
+    for m in _REF_PATTERN.finditer(stripped):
+        quoted, bare, gap = m.group(1), m.group(2), m.group(3)
+        name = m.group(4).strip()
+        if not name:
+            continue
+        if quoted is not None:
+            if quoted in tables_by_name:
+                add_column(quoted, name)
+        elif bare is not None:
+            if bare in tables_by_name:
+                add_column(bare, name)
+            elif gap:
+                add_measure(name)
+        else:
+            add_measure(name)
+
+    return column_refs + measure_refs
 
 
 def _hidden_reference_note(refs: list[tuple[str, str]]) -> str:
@@ -1642,7 +1660,7 @@ def _html_unresolved(ctx: _HtmlContext) -> list[str]:
 
 def _html_statistics(ctx: _HtmlContext) -> list[str]:
     c = ctx.collected
-    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    rows = _statistics_rows(ctx.model, c["loaded"], c["support"], c["staging"], c["hidden_tables"])
     return [
         _html_heading("statistics"),
         _html_table(["Category", "Count", "Items"], _html_rows(rows)),
@@ -1722,7 +1740,6 @@ def generate_readme(
     loaded = collected["loaded"]
     support = collected["support"]
     staging = collected["staging"]
-    loaded_visible = collected["loaded_visible"]
 
     ref_tables, ref_measures, ref_columns = _build_hidden_reference_map(model)
     lineage = _lineage_section(collected, resolved, model) if config.get("include_lineage", False) else ""
@@ -1737,7 +1754,7 @@ def generate_readme(
         "security_roles": lambda: _security_roles_section(model),
         "m_parameters":   lambda: _m_parameters_section(model),
         "unresolved":     lambda: _unresolved_section(resolved),
-        "statistics":     lambda: _statistics_section(model, loaded_visible, support, staging, collected["hidden_tables"]),
+        "statistics":     lambda: _statistics_section(model, loaded, support, staging, collected["hidden_tables"]),
     }
 
     sections = [f"# {report_name}\n", _md_contents(resolved)]
@@ -2049,7 +2066,7 @@ def _text_unresolved(ctx: _TextContext) -> list[list[str]]:
 
 def _text_statistics(ctx: _TextContext) -> list[list[str]]:
     c = ctx.collected
-    rows = _statistics_rows(ctx.model, c["loaded_visible"], c["support"], c["staging"], c["hidden_tables"])
+    rows = _statistics_rows(ctx.model, c["loaded"], c["support"], c["staging"], c["hidden_tables"])
     return [_text_heading("statistics"), _text_table(["Category", "Count", "Items"], rows)]
 
 

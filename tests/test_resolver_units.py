@@ -1,6 +1,7 @@
 """Fragment-level tests for the source resolver helpers."""
 
 from tmdl_lens.source_resolver import (
+    CONNECTOR_TYPE_LABEL,
     _build_chain_label,
     _build_label,
     _copy_resolved,
@@ -58,6 +59,16 @@ def test_label_unknown_connector_with_detail():
         url="https://x",
     )
     assert _build_label(expr, {}) == "CloudMart -> Warehouses -> https://x"
+
+
+def test_label_sharepoint_contents():
+    assert CONNECTOR_TYPE_LABEL[("SharePoint", "Contents")] == "SharePoint Contents"
+    expr = SourceExpression(
+        name="t", source_type="connector",
+        connector_namespace="SharePoint", connector_function="Contents",
+        sharepoint_url="https://contoso.sharepoint.com/sites/examples",
+    )
+    assert _build_label(expr, {}) == "SharePoint Contents -> https://contoso.sharepoint.com/sites/examples"
 
 
 def test_label_non_connector_types():

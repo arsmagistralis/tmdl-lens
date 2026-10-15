@@ -2,6 +2,8 @@
 test_readme.py - pytest tests for the Markdown/HTML generators.
 """
 
+import re
+
 from tmdl_lens.readme_generator import (
     _build_function_usage_map,
     _esc,
@@ -20,6 +22,7 @@ from tmdl_lens.tmdl_parser import (
     Table,
     TableFilter,
     UserFunction,
+    _classify_m_content,
 )
 
 
@@ -143,6 +146,29 @@ def test_html_detail_fields_match_markdown(sample_model, gen_config):
     assert "<strong>Entity:</strong>" in html
     assert "<strong>Detail:</strong>" not in html
     assert "<code>dbo.orders</code>" in html
+
+
+def test_sharepoint_contents_detail_fields():
+    table = Table(
+        name="sp-site",
+        table_type="fact",
+        partition_type="m",
+        inline_source=_classify_m_content(
+            'let\n'
+            '    Source = SharePoint.Contents("https://contoso.sharepoint.com/sites/examples")\n'
+            'in\n'
+            '    Source',
+            "sp-site",
+        ),
+    )
+    model = SemanticModel(report_name="T", tables=[table])
+    resolved = resolve_sources(model.source_expressions, model.m_parameters, tables=model.tables)
+    readme = generate_readme(model, resolved, {"report_name": "T", "include_dax": True})
+    html = generate_html(model, resolved, {"report_name": "T", "include_dax": True})
+    row = next(line for line in readme.split("\n") if line.startswith("| `sp-site`"))
+    assert "SharePoint Contents -> https://contoso.sharepoint.com/sites/examples" in row
+    assert "**SharePoint URL:** `https://contoso.sharepoint.com/sites/examples`" in readme
+    assert "<strong>SharePoint URL:</strong>" in html
 
 
 def test_measure_inventory_counts_match_measures_section(sample_model, sample_resolved, gen_config):
@@ -291,3 +317,37 @@ def test_generation_is_deterministic(sample_model, sample_resolved, gen_config):
     second_html = generate_html(sample_model, sample_resolved, gen_config)
     assert first_md.encode("utf-8") == second_md.encode("utf-8")
     assert first_html.encode("utf-8") == second_html.encode("utf-8")
+
+
+def _statistics_counts(markup, html_mode):
+    if html_mode:
+        stats = markup.split('<h2 id="statistics">', 1)[1]
+        loaded = re.search(r"<td>Loaded Tables</td><td>(\d+)</td>", stats)
+        columns = re.search(r"<td>Columns</td><td>(\d+)</td>", stats)
+        items = re.search(r"<td>Loaded Tables</td><td>\d+</td><td>(.*?)</td></tr>", stats)
+        names = re.findall(r"<code>(.*?)</code>", items.group(1))
+    else:
+        stats = markup.split("## 8. Model Statistics", 1)[1]
+        loaded = re.search(r"^\| Loaded Tables \| (\d+) \|", stats, re.MULTILINE)
+        columns = re.search(r"^\| Columns \| (\d+) \|", stats, re.MULTILINE)
+        items = re.search(r"^\| Loaded Tables \| \d+ \| (.+) \|$", stats, re.MULTILINE)
+        names = re.findall(r"`(.*?)`", items.group(1))
+    return int(loaded.group(1)), int(columns.group(1)), names
+
+
+def test_statistics_agrees_with_summary(sample_model, sample_resolved, gen_config):
+    summary_loaded = int(
+        re.search(r"This model contains (\d+) loaded table", generate_readme(
+            sample_model, sample_resolved, gen_config)).group(1)
+    )
+    tables_by_name = {t.name: t for t in sample_model.tables}
+    for markup, html_mode in (
+        (generate_readme(sample_model, sample_resolved, gen_config), False),
+        (generate_html(sample_model, sample_resolved, gen_config), True),
+    ):
+        loaded_count, columns_count, item_names = _statistics_counts(markup, html_mode)
+        assert loaded_count == summary_loaded
+        assert loaded_count == len(item_names)
+        assert columns_count == sum(
+            len(tables_by_name[name].columns) for name in item_names
+        )

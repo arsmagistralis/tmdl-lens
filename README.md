@@ -83,7 +83,7 @@ Optional documentation metadata (owner, team, refresh schedule) is set in the **
 
 By default the app skips reports whose TMDL files and documentation settings have not changed since the last run - each report is hashed, and only reports that actually moved are regenerated. Turn this off with **Skip reports with no TMDL changes** in **Configure**.
 
-On startup the app validates the config and logs a warning for a missing or empty reports folder, a missing output folder, a watch debounce outside 1-300, or an output format other than `html`, `md`, `txt` or `json`. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
+On startup the app validates the config and logs a warning for an empty reports folder, a watch debounce outside 1-300, or an output format other than `html`, `md`, `txt` or `json`; path existence is checked when a run starts. A `config.json` that cannot be read is logged as an error and is not overwritten until you press **Save**; a value of the wrong type is logged with the default used instead.
 
 ### Command line
 
