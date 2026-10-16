@@ -1270,7 +1270,6 @@ def _unresolved_section(resolved: dict[str, ResolvedSource]) -> str:
         _md_heading("unresolved"),
         "",
         "The following sources could not be resolved statically.",
-        "Use tmdl-lens to provide a manual label for each.",
         "",
         "| Expression | Reason |",
         "|---|---|",
@@ -2056,10 +2055,7 @@ def _text_unresolved(ctx: _TextContext) -> list[list[str]]:
         return []
     return [
         _text_heading("unresolved"),
-        [
-            "The following sources could not be resolved statically.",
-            "Use tmdl-lens to provide a manual label for each.",
-        ],
+        ["The following sources could not be resolved statically."],
         _text_table(["Expression", "Reason"], rows),
     ]
 

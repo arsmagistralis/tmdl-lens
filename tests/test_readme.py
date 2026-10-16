@@ -271,6 +271,7 @@ def test_table_details_covers_support_tables(sample_model, sample_resolved, gen_
 def test_readme_unresolved_section(sample_model, sample_resolved, gen_config):
     readme = generate_readme(sample_model, sample_resolved, gen_config)
     assert "## ⚠ Unresolved Sources" in readme
+    assert "manual label" not in readme
 
 
 def test_readme_includes_metadata(sample_model, sample_resolved, gen_config):

@@ -408,7 +408,6 @@ COUNTROWS('helper-order-lookup')
 ## ⚠ Unresolved Sources
 
 The following sources could not be resolved statically.
-Use tmdl-lens to provide a manual label for each.
 
 | Expression | Reason |
 |---|---|

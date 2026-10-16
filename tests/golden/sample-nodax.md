@@ -288,7 +288,6 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 ## ⚠ Unresolved Sources
 
 The following sources could not be resolved statically.
-Use tmdl-lens to provide a manual label for each.
 
 | Expression | Reason |
 |---|---|

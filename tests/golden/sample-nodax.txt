@@ -258,7 +258,6 @@ Parameters used in conditional logic or computed expressions may not appear here
 --------------------
 
 The following sources could not be resolved statically.
-Use tmdl-lens to provide a manual label for each.
 
 Expression                  Reason
 --------------------------  ----------------------------------------------
