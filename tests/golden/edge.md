@@ -67,8 +67,6 @@ This model contains 2 loaded tables, 3 measures, 1 relationship.
 | `Units` | - | - |  |
 | `Plain` | - | - |  |
 
-**Measure DAX**
-
 **`Margin`**
 ```dax
 SUM(Sales[Amount]) * 0.1
@@ -102,7 +100,7 @@ COUNTROWS(Sales)
 ---
 
 
-**Format Strings Used (4 total, 3 unique)**
+**Column Format Strings (4 total, 3 unique)**
 
 | Format String | Count | Columns |
 |---|---|---|
@@ -147,7 +145,7 @@ COUNTROWS(Sales)
 ```
 
 
-**Format Strings Used (3 total, 2 unique)**
+**Measure Format Strings (3 total, 2 unique)**
 
 | Format String | Count | Measures |
 |---|---|---|

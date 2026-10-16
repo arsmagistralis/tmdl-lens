@@ -174,7 +174,7 @@ COUNTROWS(Orders)
 ```
 
 
-**Format Strings Used (1 total, 1 unique)**
+**Measure Format Strings (1 total, 1 unique)**
 
 | Format String | Count | Measures |
 |---|---|---|

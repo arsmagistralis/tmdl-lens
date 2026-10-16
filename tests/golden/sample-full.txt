@@ -44,7 +44,7 @@ Table               Source Type  Source
 ------------------  -----------  -------------------------------------------------------------------------------------
 source-sql-staging  SQL          source-sql-direct -> SQL -> fake-server.database.windows.net -> SalesDB -> dbo.orders
 
-Not Loaded Table Format Strings Used (3 total, 2 unique)
+Not Loaded Column Format Strings (3 total, 2 unique)
 
 Format String  Count  Columns
 -------------  -----  ----------------------------------------------------------------
@@ -97,8 +97,6 @@ Measure                    Format  Description  Hidden
 _Row Count Helper          #,##0   -            Hidden
 Order Fulfillment Summary  0       -
 
-Measure DAX
-
 _Row Count Helper
 
     COUNTROWS('fact-sales')
@@ -134,8 +132,6 @@ Measure           Format  Description  Hidden
 ----------------  ------  -----------  ------
 Open Order Count  0       -
 
-Measure DAX
-
 Open Order Count
 
     COUNTROWS('helper-order-lookup')
@@ -161,8 +157,6 @@ Prior Year   3        SELECTEDMEASUREFORMATSTRING()
 YoY %        4        0.00%
 
 Calculation items can be applied to any measure at report-build time (via SELECTEDMEASURE()). TMDL has no static record of which measures a given item is actually used with.
-
-Item DAX
 
 YTD
 
@@ -235,7 +229,7 @@ param-metric-selector         -     -       none          [Value1]       param-m
 param-metric-selector Fields  -     -       none          [Value2]       -                            -            Hidden
 param-metric-selector Order   -     0       sum           [Value3]       -                            -            Hidden
 
-Format Strings Used (23 total, 3 unique)
+Column Format Strings (23 total, 3 unique)
 
 Format String  Count  Columns
 -------------  -----  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -287,7 +281,7 @@ Open Order Count
 
     COUNTROWS('helper-order-lookup')
 
-Format Strings Used (7 total, 3 unique)
+Measure Format Strings (7 total, 3 unique)
 
 Format String  Count  Measures
 -------------  -----  ----------------------------------------------------------------------------------

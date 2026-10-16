@@ -56,7 +56,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 | `source-sql-staging` | SQL | source-sql-direct -> SQL -> fake-server.database.windows.net -> SalesDB -> dbo.orders |
 
 
-**Not Loaded Table Format Strings Used (3 total, 2 unique)**
+**Not Loaded Column Format Strings (3 total, 2 unique)**
 
 | Format String | Count | Columns |
 |---|---|---|
@@ -197,7 +197,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 ---
 
 
-**Format Strings Used (23 total, 3 unique)**
+**Column Format Strings (23 total, 3 unique)**
 
 | Format String | Count | Columns |
 |---|---|---|
@@ -221,7 +221,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 | `Open Order Count` | `helper-order-lookup` | `0` | - |
 
 
-**Format Strings Used (7 total, 3 unique)**
+**Measure Format Strings (7 total, 3 unique)**
 
 | Format String | Count | Measures |
 |---|---|---|

@@ -52,8 +52,6 @@ Margin   0.0%    -
 Units    -       -
 Plain    -       -
 
-Measure DAX
-
 Margin
 
     SUM(Sales[Amount]) * 0.1
@@ -81,7 +79,7 @@ Column  Type     Format  Summarize By  Source Column  Sort By  Description  Hidd
 ------  -------  ------  ------------  -------------  -------  -----------  ------
 Key     Integer  -       -             -              -        -
 
-Format Strings Used (4 total, 3 unique)
+Column Format Strings (4 total, 3 unique)
 
 Format String  Count  Columns
 -------------  -----  -------------------------
@@ -125,7 +123,7 @@ Units
 
     COUNTROWS(Sales)
 
-Format Strings Used (3 total, 2 unique)
+Measure Format Strings (3 total, 2 unique)
 
 Format String  Count  Measures
 -------------  -----  ----------------------------
