@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.2](https://github.com/arsmagistralis/tmdl-lens/compare/v0.7.1...v0.7.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **generator:** align Markdown, HTML and text renderer output ([68e823f](https://github.com/arsmagistralis/tmdl-lens/commit/68e823f37147746a1f2908c99fa3766d0d847221))
+* **generator:** drop unreachable manual source label claim ([055e47b](https://github.com/arsmagistralis/tmdl-lens/commit/055e47b58d7227b329dada26327abc402654ba9d))
+* **packaging:** raise build requirement and ship tests in the sdist ([dd504be](https://github.com/arsmagistralis/tmdl-lens/commit/dd504be780cc878e11c7259a770245a48446cb93))
+* renderer alignment, sdist packaging fix and repository URL update ([59d2583](https://github.com/arsmagistralis/tmdl-lens/commit/59d25837c5366a6e84fe1bc0ec8b09c7567d2ebb))
+
 ## [0.7.1](https://github.com/nox-magistralis/tmdl-lens/compare/v0.7.0...v0.7.1) (2026-10-15)
 
 
