@@ -1,1 +1,7 @@
+include pytest.ini
+include tests/conftest.py
+graft tests/fixtures
+graft tests/golden
+graft sample
+graft docs
 exclude tests/test_rules_hygiene.py

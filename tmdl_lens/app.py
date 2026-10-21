@@ -556,7 +556,7 @@ class App(ctk.CTk):
 
         # Author
         ctk.CTkLabel(
-            bar, text="github.com/nox-magistralis",
+            bar, text="github.com/arsmagistralis",
             font=ctk.CTkFont(family="Courier New", size=11),
             text_color=COLORS["text_3"],
         ).grid(row=0, column=12, padx=(0, 14), pady=0, sticky="e")

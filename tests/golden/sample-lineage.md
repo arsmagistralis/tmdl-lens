@@ -59,7 +59,7 @@ This model contains 3 loaded tables, 1 calculated table, 1 field parameter, 1 me
 | `source-sql-staging` | SQL | source-sql-direct -> SQL -> fake-server.database.windows.net -> SalesDB -> dbo.orders |
 
 
-**Not Loaded Table Format Strings Used (3 total, 2 unique)**
+**Not Loaded Column Format Strings (3 total, 2 unique)**
 
 | Format String | Count | Columns |
 |---|---|---|
@@ -139,8 +139,6 @@ flowchart LR
 | `_Row Count Helper` | `#,##0` | - | Hidden |
 | `Order Fulfillment Summary` | `0` | - |  |
 
-**Measure DAX**
-
 **`_Row Count Helper`**
 ```dax
 COUNTROWS('fact-sales')
@@ -179,8 +177,6 @@ COUNTROWS('fact-sales')
 |---|---|---|---|
 | `Open Order Count` | `0` | - |  |
 
-**Measure DAX**
-
 **`Open Order Count`**
 ```dax
 COUNTROWS('helper-order-lookup')
@@ -209,8 +205,6 @@ COUNTROWS('helper-order-lookup')
 | `YoY %` | 4 | `0.00%` |
 
 > Calculation items can be applied to any measure at report-build time (via `SELECTEDMEASURE()`). TMDL has no static record of which measures a given item is actually used with.
-
-**Item DAX**
 
 **`YTD`**
 ```dax
@@ -296,7 +290,7 @@ CALENDARAUTO()
 ---
 
 
-**Format Strings Used (23 total, 3 unique)**
+**Column Format Strings (23 total, 3 unique)**
 
 | Format String | Count | Columns |
 |---|---|---|
@@ -355,7 +349,7 @@ COUNTROWS('helper-order-lookup')
 ```
 
 
-**Format Strings Used (7 total, 3 unique)**
+**Measure Format Strings (7 total, 3 unique)**
 
 | Format String | Count | Measures |
 |---|---|---|
@@ -433,7 +427,6 @@ COUNTROWS('helper-order-lookup')
 ## ⚠ Unresolved Sources
 
 The following sources could not be resolved statically.
-Use tmdl-lens to provide a manual label for each.
 
 | Expression | Reason |
 |---|---|

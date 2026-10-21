@@ -346,11 +346,11 @@ def _role_rows(model: SemanticModel) -> list:
     return rows
 
 
-def _parameter_rows(model: SemanticModel, dash_blank_value: bool) -> list:
+def _parameter_rows(model: SemanticModel) -> list:
     usage_map = _build_param_usage_map(model)
     rows = []
     for p in model.m_parameters:
-        value = _Code(p.value) if p.value.strip() or not dash_blank_value else "-"
+        value = _Code(p.value) if p.value.strip() else "-"
         rows.append((
             _Code(p.name),
             p.param_type,
@@ -670,7 +670,7 @@ def _data_sources_section(
         ]
         lines += _md_table_rows(_source_rows(staging_tables, resolved, mark_hidden=False))
         lines.append("")
-        staging_fmt = _column_format_string_inventory(staging_tables, heading="Not Loaded Table Format Strings Used")
+        staging_fmt = _column_format_string_inventory(staging_tables, heading="Not Loaded Column Format Strings")
         if staging_fmt:
             lines.append(staging_fmt)
     else:
@@ -806,9 +806,6 @@ def _table_detail_block(
     elif table.table_type == "measures_only":
         lines.append("**Source:** Measures only - no data source  ")
 
-    if not table.is_loaded:
-        lines += ["", "> ⚠ Not loaded (`enableLoad = false`)."]
-
     if table.is_hidden:
         lines += ["**Hidden:** Yes  "]
 
@@ -867,7 +864,6 @@ def _table_detail_block(
             "",
         ]
         if include_dax:
-            lines += ["**Item DAX**", ""]
             for item in table.calculation_items:
                 lines += [f"**`{item.name}`**", "```dax", item.dax_expression, "```", ""]
 
@@ -880,7 +876,7 @@ def _table_detail_block(
         lines += ["**Measures**", "", "| Measure | Format | Description | Hidden |", "|---|---|---|---|"]
         lines += _md_table_rows(_table_measure_rows(display_measures))
         if include_dax:
-            lines += ["", "**Measure DAX**", ""]
+            lines.append("")
             for m in display_measures:
                 if not m.dax_expression.strip():
                     continue
@@ -943,12 +939,12 @@ def _md_format_inventory(pairs: list, heading: str, items_header: str) -> str:
     return "\n".join(lines)
 
 
-def _column_format_string_inventory(tables: list[Table], heading: str = "Format Strings Used") -> str:
+def _column_format_string_inventory(tables: list[Table], heading: str = "Column Format Strings") -> str:
     return _md_format_inventory(_column_format_pairs(tables), heading, "Columns")
 
 
 def _measure_format_string_inventory(measures: list) -> str:
-    return _md_format_inventory(_measure_format_pairs(measures), "Format Strings Used", "Measures")
+    return _md_format_inventory(_measure_format_pairs(measures), "Measure Format Strings", "Measures")
 
 
 def _measures_section(measures: list, include_dax: bool) -> str:
@@ -1249,7 +1245,7 @@ def _m_parameters_section(model: SemanticModel) -> str:
         return "\n".join(lines)
 
     lines += ["| Parameter | Type | Value | Used By |", "|---|---|---|---|"]
-    lines += _md_table_rows(_parameter_rows(model, dash_blank_value=True))
+    lines += _md_table_rows(_parameter_rows(model))
 
     lines += [
         "",
@@ -1270,7 +1266,6 @@ def _unresolved_section(resolved: dict[str, ResolvedSource]) -> str:
         _md_heading("unresolved"),
         "",
         "The following sources could not be resolved statically.",
-        "Use tmdl-lens to provide a manual label for each.",
         "",
         "| Expression | Reason |",
         "|---|---|",
@@ -1473,6 +1468,8 @@ def _html_data_sources(ctx: _HtmlContext) -> list[str]:
     if loaded:
         body.append(_html_table(["Table", "Source Type", "Source"],
                                 _html_rows(_source_rows(loaded, ctx.resolved, mark_hidden=True))))
+    else:
+        body.append('<p class="empty">No loaded tables found.</p>')
     if support:
         body.append('<h3>Support Tables</h3>')
         body.append(_html_table(["Table", "Type"], _html_rows(_support_rows(support))))
@@ -1498,6 +1495,8 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
         table_detail_tables = ctx.collected["loaded"] + detail_support
     else:
         table_detail_tables = ctx.collected["loaded_visible"] + detail_support
+    if not table_detail_tables:
+        body.append('<p class="empty">No loaded tables.</p>')
     for t in table_detail_tables:
         body.append(f'<h3>{_code(t.name)}</h3>')
         rs = get_table_source(t, ctx.resolved)
@@ -1536,8 +1535,8 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
         if calc_cols:
             body.append('<h4>Calculated Columns</h4>')
             for col in calc_cols:
+                body.append(f'<p><strong>{_code(col.name)}</strong></p>')
                 if ctx.include_dax and col.dax_expression:
-                    body.append(f'<p><strong>{_code(col.name)}</strong></p>')
                     body.append(_pre(col.dax_expression))
                     body += _html_hidden_note(col.dax_expression, ctx.refs)
         if t.calculation_items:
@@ -1564,6 +1563,9 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
                     body.append(f'<h4>{_code(m.name)}</h4>')
                     body.append(_pre(m.dax_expression))
                     body += _html_hidden_note(m.dax_expression, ctx.refs)
+    column_pairs = _column_format_pairs(ctx.collected["loaded"] + ctx.collected["support"])
+    if column_pairs:
+        body.append(_html_fmt_inventory_table("Column Format Strings", column_pairs, "Columns"))
     return body
 
 
@@ -1586,9 +1588,6 @@ def _html_measures(ctx: _HtmlContext) -> list[str]:
         body.append(_html_fmt_inventory_table(
             "Measure Format Strings", _measure_format_pairs(all_measures), "Measures"
         ))
-    column_pairs = _column_format_pairs(ctx.collected["loaded"] + ctx.collected["support"])
-    if column_pairs:
-        body.append(_html_fmt_inventory_table("Column Format Strings", column_pairs, "Columns"))
     return body
 
 
@@ -1642,8 +1641,9 @@ def _html_m_parameters(ctx: _HtmlContext) -> list[str]:
         body.append('<p class="empty">No M parameters defined.</p>')
         return body
     body.append(_html_table(["Parameter", "Type", "Value", "Used By"],
-                            _html_rows(_parameter_rows(ctx.model, dash_blank_value=False))))
-    body.append('<p class="section-note">Only direct parameter references in connector calls are shown.</p>')
+                            _html_rows(_parameter_rows(ctx.model))))
+    body.append('<p class="section-note">Only direct parameter references in connector calls are shown. '
+                'Parameters used in conditional logic or computed expressions may not appear here.</p>')
     return body
 
 
@@ -1868,7 +1868,7 @@ def _text_data_sources(ctx: _TextContext) -> list[list[str]]:
         ])
         paras.append(_text_table(["Table", "Source Type", "Source"],
                                  _source_rows(staging, ctx.resolved, mark_hidden=False)))
-        paras += _text_inventory(_column_format_pairs(staging), "Not Loaded Table Format Strings Used", "Columns")
+        paras += _text_inventory(_column_format_pairs(staging), "Not Loaded Column Format Strings", "Columns")
     else:
         paras.append(["None."])
     return paras
@@ -1893,8 +1893,6 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
     if dax_partition:
         paras.append(_text_dax(dax_partition))
     flags = []
-    if not table.is_loaded:
-        flags.append("! Not loaded (enableLoad = false).")
     if table.is_hidden:
         flags.append("Hidden: Yes")
     paras.append(flags)
@@ -1933,7 +1931,6 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
             "a given item is actually used with."
         ])
         if ctx.include_dax:
-            paras.append(["Item DAX"])
             for item in table.calculation_items:
                 paras.append([item.name])
                 paras.append(_text_dax(item.dax_expression))
@@ -1943,7 +1940,6 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
         paras.append(["Measures"])
         paras.append(_text_table(["Measure", "Format", "Description", "Hidden"], _table_measure_rows(display_measures)))
         if ctx.include_dax:
-            paras.append(["Measure DAX"])
             for m in display_measures:
                 if not m.dax_expression.strip():
                     continue
@@ -1969,7 +1965,7 @@ def _text_table_details(ctx: _TextContext) -> list[list[str]]:
         paras.append(["No loaded tables."])
     for t in tables:
         paras += _text_table_block(t, ctx)
-    paras += _text_inventory(_column_format_pairs(loaded + support), "Format Strings Used", "Columns")
+    paras += _text_inventory(_column_format_pairs(loaded + support), "Column Format Strings", "Columns")
     return paras
 
 
@@ -1988,7 +1984,7 @@ def _text_measures(ctx: _TextContext) -> list[list[str]]:
                     continue
                 paras.append([m.name])
                 paras.append(_text_dax(m.dax_expression))
-    paras += _text_inventory(_measure_format_pairs(measures), "Format Strings Used", "Measures")
+    paras += _text_inventory(_measure_format_pairs(measures), "Measure Format Strings", "Measures")
     return paras
 
 
@@ -2042,7 +2038,7 @@ def _text_m_parameters(ctx: _TextContext) -> list[list[str]]:
         paras.append(["No M parameters defined."])
         return paras
     paras.append(_text_table(["Parameter", "Type", "Value", "Used By"],
-                             _parameter_rows(ctx.model, dash_blank_value=True)))
+                             _parameter_rows(ctx.model)))
     paras.append([
         "Only direct parameter references in connector calls are shown.",
         "Parameters used in conditional logic or computed expressions may not appear here.",
@@ -2056,10 +2052,7 @@ def _text_unresolved(ctx: _TextContext) -> list[list[str]]:
         return []
     return [
         _text_heading("unresolved"),
-        [
-            "The following sources could not be resolved statically.",
-            "Use tmdl-lens to provide a manual label for each.",
-        ],
+        ["The following sources could not be resolved statically."],
         _text_table(["Expression", "Reason"], rows),
     ]
 

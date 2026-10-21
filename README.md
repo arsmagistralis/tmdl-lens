@@ -16,7 +16,7 @@ Each generated README includes:
 
 - **Contents** - a linked table of contents of the sections below (Markdown and HTML)
 - **Lineage** (optional, Markdown) - a Mermaid source-to-table flowchart, see [Lineage diagram](#lineage-diagram)
-- **Data Sources** - connector type and resolved source detail for every query. 30+ Power Query connector functions have dedicated labels (SQL, Dataflows, SharePoint, Excel, OData, Azure Blob/Table/Data Lake storage, Databricks, Snowflake, Salesforce, Oracle, PostgreSQL, SAP HANA, and more); any connector without a dedicated label is still auto-detected from the query and shown with its namespace and function for manual labelling.
+- **Data Sources** - connector type and resolved source detail for every query. 30+ Power Query connector functions have dedicated labels (SQL, Dataflows, SharePoint, Excel, OData, Azure Blob/Table/Data Lake storage, Databricks, Snowflake, Salesforce, Oracle, PostgreSQL, SAP HANA, and more); any connector without a dedicated label is still auto-detected from the query and shown with its namespace and function.
 - **Table Details** - table type, source detail, and column list
 - **Measures** - full DAX (optional), display folder, and format string
 - **Functions** - DAX user-defined functions with description, where they are used, and full DAX (optional)
@@ -48,7 +48,7 @@ python -m tmdl_lens.app
 
 ### Option B - Standalone executable
 
-Download `tmdl-lens.v<version>.zip` from the [Releases](https://github.com/nox-magistralis/tmdl-lens/releases) page, extract it, and run `tmdl-lens.exe` from the extracted folder. No Python or pip required. Keep the extracted files together - the executable loads its dependencies from the `_internal` folder next to it.
+Download `tmdl-lens.v<version>.zip` from the [Releases](https://github.com/arsmagistralis/tmdl-lens/releases) page, extract it, and run `tmdl-lens.exe` from the extracted folder. No Python or pip required. Keep the extracted files together - the executable loads its dependencies from the `_internal` folder next to it.
 
 A `config.json` file will be created alongside the executable on first run to store your settings.
 
@@ -59,7 +59,7 @@ A `config.json` file will be created alongside the executable on first run to st
 Requires Python 3.12+.
 
 ```
-git clone https://github.com/nox-magistralis/tmdl-lens.git
+git clone https://github.com/arsmagistralis/tmdl-lens.git
 cd tmdl-lens
 pip install -r requirements.txt
 python main.py
@@ -158,7 +158,7 @@ exact wording or layout of the generated HTML/Markdown (best effort).
   report is skipped with a message naming the reason.
 - Connectors are detected from the query text. Known connectors get a
   dedicated label; anything else is shown with its Power Query namespace and
-  function and is meant to be labelled manually.
+  function.
 - The parser targets the TMDL shapes seen in real PBIP projects, but the
   format keeps evolving - an unhandled object type is reported rather than
   crashing.
@@ -202,7 +202,7 @@ tmdl-lens/
 
 ## Author
 
-**Marcin Mozol** - [github.com/nox-magistralis](https://github.com/nox-magistralis)
+**Marcin Mozol** - [github.com/arsmagistralis](https://github.com/arsmagistralis)
 
 ---
 

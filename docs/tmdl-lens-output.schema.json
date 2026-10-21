@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/nox-magistralis/tmdl-lens/blob/main/docs/tmdl-lens-output.schema.json",
+  "$id": "https://github.com/arsmagistralis/tmdl-lens/blob/main/docs/tmdl-lens-output.schema.json",
   "title": "tmdl-lens JSON output",
   "description": "Output of tmdl-lens --format json. Every list of named items is sorted by name; source.chain keeps its lineage order. No timestamp or tool version is written.",
   "type": "object",

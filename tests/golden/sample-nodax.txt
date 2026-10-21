@@ -41,7 +41,7 @@ Table               Source Type  Source
 ------------------  -----------  -------------------------------------------------------------------------------------
 source-sql-staging  SQL          source-sql-direct -> SQL -> fake-server.database.windows.net -> SalesDB -> dbo.orders
 
-Not Loaded Table Format Strings Used (3 total, 2 unique)
+Not Loaded Column Format Strings (3 total, 2 unique)
 
 Format String  Count  Columns
 -------------  -----  ----------------------------------------------------------------
@@ -176,7 +176,7 @@ param-metric-selector         -     -       none          [Value1]       param-m
 param-metric-selector Fields  -     -       none          [Value2]       -                            -            Hidden
 param-metric-selector Order   -     0       sum           [Value3]       -                            -            Hidden
 
-Format Strings Used (23 total, 3 unique)
+Column Format Strings (23 total, 3 unique)
 
 Format String  Count  Columns
 -------------  -----  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -200,7 +200,7 @@ _Row Count Helper          fact-sales           #,##0     -
 Order Fulfillment Summary  fact-sales           0         -
 Open Order Count           helper-order-lookup  0         -
 
-Format Strings Used (7 total, 3 unique)
+Measure Format Strings (7 total, 3 unique)
 
 Format String  Count  Measures
 -------------  -----  ----------------------------------------------------------------------------------
@@ -258,7 +258,6 @@ Parameters used in conditional logic or computed expressions may not appear here
 --------------------
 
 The following sources could not be resolved statically.
-Use tmdl-lens to provide a manual label for each.
 
 Expression                  Reason
 --------------------------  ----------------------------------------------

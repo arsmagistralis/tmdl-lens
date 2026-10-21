@@ -16,6 +16,7 @@ from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.tmdl_parser import (
     Column,
     Measure,
+    MParameter,
     Relationship,
     SecurityRole,
     SemanticModel,
@@ -174,9 +175,21 @@ def test_sharepoint_contents_detail_fields():
 def test_measure_inventory_counts_match_measures_section(sample_model, sample_resolved, gen_config):
     readme = generate_readme(sample_model, sample_resolved, gen_config)
     html = generate_html(sample_model, sample_resolved, gen_config)
-    assert "**Format Strings Used (7 total, 3 unique)**" in readme
+    assert "**Measure Format Strings (7 total, 3 unique)**" in readme
     assert "Measure Format Strings (7 total, 3 unique)" in html
     assert "| Measures | 7 | - |" in readme
+
+
+def test_blank_parameter_value_is_dash_in_html_and_markdown():
+    model = SemanticModel(
+        report_name="T",
+        m_parameters=[MParameter(name="BlankParam", value="")],
+    )
+    readme = generate_readme(model, {}, {"report_name": "T", "include_dax": True})
+    html = generate_html(model, {}, {"report_name": "T", "include_dax": True})
+    row = next(line for line in readme.split("\n") if line.startswith("| `BlankParam`"))
+    assert row == "| `BlankParam` | Text | - | - |"
+    assert "<td><code>BlankParam</code></td><td>Text</td><td>-</td><td>-</td>" in html
 
 
 def test_hidden_support_table_counted_once():
@@ -271,6 +284,7 @@ def test_table_details_covers_support_tables(sample_model, sample_resolved, gen_
 def test_readme_unresolved_section(sample_model, sample_resolved, gen_config):
     readme = generate_readme(sample_model, sample_resolved, gen_config)
     assert "## ⚠ Unresolved Sources" in readme
+    assert "manual label" not in readme
 
 
 def test_readme_includes_metadata(sample_model, sample_resolved, gen_config):
