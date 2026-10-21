@@ -48,7 +48,7 @@ python -m tmdl_lens.app
 
 ### Option B - Standalone executable
 
-Download `tmdl-lens.v<version>.zip` from the [Releases](https://github.com/nox-magistralis/tmdl-lens/releases) page, extract it, and run `tmdl-lens.exe` from the extracted folder. No Python or pip required. Keep the extracted files together - the executable loads its dependencies from the `_internal` folder next to it.
+Download `tmdl-lens.v<version>.zip` from the [Releases](https://github.com/arsmagistralis/tmdl-lens/releases) page, extract it, and run `tmdl-lens.exe` from the extracted folder. No Python or pip required. Keep the extracted files together - the executable loads its dependencies from the `_internal` folder next to it.
 
 A `config.json` file will be created alongside the executable on first run to store your settings.
 
@@ -59,7 +59,7 @@ A `config.json` file will be created alongside the executable on first run to st
 Requires Python 3.12+.
 
 ```
-git clone https://github.com/nox-magistralis/tmdl-lens.git
+git clone https://github.com/arsmagistralis/tmdl-lens.git
 cd tmdl-lens
 pip install -r requirements.txt
 python main.py
@@ -202,7 +202,7 @@ tmdl-lens/
 
 ## Author
 
-**Marcin Mozol** - [github.com/nox-magistralis](https://github.com/nox-magistralis)
+**Marcin Mozol** - [github.com/arsmagistralis](https://github.com/arsmagistralis)
 
 ---
 

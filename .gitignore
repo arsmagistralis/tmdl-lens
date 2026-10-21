@@ -7,6 +7,7 @@ tmdl_lens/config.json
 .clinerules
 AGENTS.md
 CLAUDE.md
+.opencode
 
 # Throwaway debug/test scripts at the repo root - never commit these
 /debug*.py
