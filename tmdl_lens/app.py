@@ -18,7 +18,13 @@ import customtkinter as ctk
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tmdl_lens.config import load_result, save as save_config, validate_config
-from tmdl_lens.pipeline import Pipeline, PipelineConfig, PipelineResult
+from tmdl_lens.pipeline import (
+    Pipeline,
+    PipelineConfig,
+    PipelineResult,
+    _detect_multi_pbip_folders,
+    _find_pbip_files,
+)
 from tmdl_lens.version import __version__ as APP_VERSION
 
 try:
@@ -73,11 +79,11 @@ class App(ctk.CTk):
         self._last_run: str = "never"
         self._run_thread: threading.Thread | None = None
         self._watcher: TmdlWatcher | None = None
-        self._watcher_config: dict = {}
         self._watcher_enabled: bool = (
             WATCHER_AVAILABLE
             and self.config_data.get("features", {}).get("watcher", True)
         )
+        self._run_active: bool = False
         self._loading: bool = False
 
         self._build_window()
@@ -814,8 +820,11 @@ class App(ctk.CTk):
         if not os.path.isdir(reports_folder):
             self.log(f"folder not found: {reports_folder}", "err")
             return
+        if self._run_active:
+            self.log("skipped: run in progress", "warn")
+            return
 
-        # Disable button during run
+        self._run_active = True
         self._run_btn.configure(state="disabled", text="Running...")
         self._run_thread = threading.Thread(
             target=self._run_pipeline_async,
@@ -834,7 +843,6 @@ class App(ctk.CTk):
             self.log("watcher not started - no reports folder selected", "msg")
             return
         self._stop_watcher()
-        self._watcher_config = self._collect_config()
         debounce_raw = self._debounce_var.get().replace(" sec", "")
         try:
             debounce = int(debounce_raw)
@@ -889,78 +897,118 @@ class App(ctk.CTk):
         """Called from watchdog thread when a debounced change fires."""
         pbip_name = os.path.splitext(os.path.basename(pbip_path))[0]
         self.log(f"change detected - {pbip_name}", "warn")
-        config = self._watcher_config
+        self.after(0, self._watcher_launch, pbip_path)
 
-        pipeline_config = PipelineConfig(
-            reports_folder=config["reports_folder"],
-            output_folder=config.get("output_folder", ""),
-            include_dax=config.get("include_dax", True),
-            include_lineage=config.get("include_lineage", False),
-            output_format=config.get("output_format", "html"),
-            overwrite=True,
-            skip_unchanged=config.get("skip_unchanged", False),
-            owner=config.get("owner", ""),
-            team=config.get("team", ""),
-            refresh_schedule=config.get("refresh_schedule", ""),
-        )
+    def _watcher_launch(self, pbip_path: str):
+        """Runs on the Tk thread to apply current settings and start a watcher run."""
+        try:
+            config = self._collect_config()
+            report_folder = os.path.dirname(pbip_path)
+            siblings = _find_pbip_files(report_folder)
+            skipped, _ = _detect_multi_pbip_folders(siblings)
+            if report_folder in skipped:
+                names = sorted(
+                    os.path.basename(f)
+                    for f in siblings
+                    if os.path.dirname(f) == report_folder
+                )
+                self.log(
+                    f"skipped: {report_folder} contains multiple .pbip files ({', '.join(names)})",
+                    "warn",
+                )
+                return
+            if self._run_active:
+                self.log("skipped: run in progress", "warn")
+                return
 
-        pipeline = Pipeline(
-            config=pipeline_config,
-            saved_hashes=config.get("file_hashes", {}),
-            logger=lambda msg, level: self.log(msg, level),
-        )
+            self._run_active = True
+            self._run_btn.configure(state="disabled", text="Running...")
+            threading.Thread(
+                target=self._run_single_async,
+                args=(pbip_path, config),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            self.log(f"watcher error: {e}", "err")
 
-        result = pipeline.run_single(pbip_path)
-        if result.content_hash:
-            self.after(0, lambda h=result.content_hash, k=result.hash_key: self._persist_hashes({k: h}))
-        if result.success:
-            now = datetime.now().strftime("%H:%M:%S")
-            self.after(0, lambda: self._last_run_label.configure(
-                text=f"last run - {now}"
-            ))
+    def _run_single_async(self, pbip_path: str, config: dict):
+        """Run a single report in a background thread."""
+        try:
+            pipeline_config = PipelineConfig(
+                reports_folder=config["reports_folder"],
+                output_folder=config.get("output_folder", ""),
+                include_dax=config.get("include_dax", True),
+                include_lineage=config.get("include_lineage", False),
+                output_format=config.get("output_format", "html"),
+                overwrite=True,
+                skip_unchanged=config.get("skip_unchanged", False),
+                owner=config.get("owner", ""),
+                team=config.get("team", ""),
+                refresh_schedule=config.get("refresh_schedule", ""),
+            )
+
+            pipeline = Pipeline(
+                config=pipeline_config,
+                saved_hashes=config.get("file_hashes", {}),
+                logger=lambda msg, level: self.log(msg, level),
+            )
+
+            result = pipeline.run_single(pbip_path)
+        except Exception as e:
+            self.log(f"watcher run error: {e}", "err")
+            self.after(0, self._on_single_done, None)
+            return
+        self.after(0, self._on_single_done, result)
+
+    def _on_single_done(self, result):
+        """Update UI after a watcher single-report run completes."""
+        if result is not None:
+            if result.content_hash:
+                self._persist_hashes({result.hash_key: result.content_hash})
+            if result.success:
+                now = datetime.now().strftime("%H:%M:%S")
+                self._last_run_label.configure(text=f"last run - {now}")
+        self._run_active = False
+        self._run_btn.configure(state="normal", text="▶  Run Now")
 
     def _run_pipeline_async(self, config: dict):
         """Run the full pipeline in a background thread."""
-        pipeline_config = PipelineConfig(
-            reports_folder=config["reports_folder"],
-            output_folder=config.get("output_folder", ""),
-            include_dax=config.get("include_dax", True),
-            include_lineage=config.get("include_lineage", False),
-            output_format=config.get("output_format", "html"),
-            overwrite=config.get("overwrite_readme", False),
-            skip_unchanged=config.get("skip_unchanged", False),
-            owner=config.get("owner", ""),
-            team=config.get("team", ""),
-            refresh_schedule=config.get("refresh_schedule", ""),
-        )
-
-        pipeline = Pipeline(
-            config=pipeline_config,
-            saved_hashes=config.get("file_hashes", {}),
-            logger=lambda msg, level: self.log(msg, level),
-        )
-
         try:
+            pipeline_config = PipelineConfig(
+                reports_folder=config["reports_folder"],
+                output_folder=config.get("output_folder", ""),
+                include_dax=config.get("include_dax", True),
+                include_lineage=config.get("include_lineage", False),
+                output_format=config.get("output_format", "html"),
+                overwrite=config.get("overwrite_readme", False),
+                skip_unchanged=config.get("skip_unchanged", False),
+                owner=config.get("owner", ""),
+                team=config.get("team", ""),
+                refresh_schedule=config.get("refresh_schedule", ""),
+            )
+
+            pipeline = Pipeline(
+                config=pipeline_config,
+                saved_hashes=config.get("file_hashes", {}),
+                logger=lambda msg, level: self.log(msg, level),
+            )
+
             result = pipeline.run()
         except Exception as e:
             self.log(f"pipeline error: {e}", "err")
-            self.after(0, lambda: self._run_btn.configure(
-                state="normal", text="▶  Run Now"
-            ))
+            self.after(0, self._on_pipeline_done, None)
             return
-        self._on_pipeline_done(result)
+        self.after(0, self._on_pipeline_done, result)
 
-    def _on_pipeline_done(self, result: PipelineResult):
+    def _on_pipeline_done(self, result: PipelineResult | None):
         """Update UI after pipeline run completes."""
-        now = datetime.now().strftime("%H:%M:%S")
-        self._last_run = now
-        self.after(0, lambda: self._run_btn.configure(
-            state="normal", text="▶  Run Now"
-        ))
-        self.after(0, lambda: self._last_run_label.configure(
-            text=f"last run - {now}"
-        ))
-        self.after(0, lambda: self._persist_hashes(result.hashes))
+        if result is not None:
+            self._persist_hashes(result.hashes)
+            now = datetime.now().strftime("%H:%M:%S")
+            self._last_run = now
+            self._last_run_label.configure(text=f"last run - {now}")
+        self._run_active = False
+        self._run_btn.configure(state="normal", text="▶  Run Now")
 
     def _persist_hashes(self, new_hashes: dict):
         """Merge freshly computed hashes into config.json (main thread only)."""
