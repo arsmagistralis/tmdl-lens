@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.3](https://github.com/arsmagistralis/tmdl-lens/compare/v0.7.2...v0.7.3) (2026-11-05)
+
+
+### Bug Fixes
+
+* **app:** share run gate and live settings between watcher and Run Now ([6808bae](https://github.com/arsmagistralis/tmdl-lens/commit/6808bae6dfe5cd5ef86fbfa98e10e950b65c975f))
+* **watcher:** correct path resolution, event coverage and run gating ([b8f0e0f](https://github.com/arsmagistralis/tmdl-lens/commit/b8f0e0f48ff2db0fc8c8e395996cc790a18135a9))
+* **watcher:** handle deletions, moves, root paths and callback errors ([cbcbfce](https://github.com/arsmagistralis/tmdl-lens/commit/cbcbfce76bf5bfded1f7234dfa9e32530eab00bf))
+
 ## [0.7.2](https://github.com/arsmagistralis/tmdl-lens/compare/v0.7.1...v0.7.2) (2026-10-21)
 
 
