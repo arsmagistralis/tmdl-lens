@@ -128,10 +128,10 @@ pre code { background: none; color: inherit; padding: 0; }
 <pre><code>WEEKDAY('dim-date'[Date], 2) &gt; 5</code></pre>
 <p><strong><code>PriorYearFlag</code></strong></p>
 <pre><code>IF(
-				YEAR('dim-date'[Date]) = YEAR(TODAY()) - 1,
-				TRUE(),
-				FALSE()
-			)</code></pre>
+    YEAR('dim-date'[Date]) = YEAR(TODAY()) - 1,
+    TRUE(),
+    FALSE()
+)</code></pre>
 <h3><code>param-metric-selector</code></h3>
 <p><strong>Source:</strong> Field Parameter</p>
 <h4>Columns</h4>
@@ -163,7 +163,7 @@ pre code { background: none; color: inherit; padding: 0; }
 <pre><code>(amount: number, rate: number) =&gt; amount * (1 + rate)</code></pre>
 <h4><code>SafeStockThreshold</code></h4>
 <pre><code>(category: string) =&gt;
-		IF(category == &quot;Hardware&quot;, 50, 20)</code></pre>
+IF(category == &quot;Hardware&quot;, 50, 20)</code></pre>
 <h2 id="relationships">5. Relationships</h2>
 <table><thead><tr><th>From Table</th><th>From Column</th><th>To Table</th><th>To Column</th><th>Cardinality</th><th>Cross Filter</th><th>Security Filter</th></tr></thead><tbody><tr><td><code>fact-sales</code></td><td><code>order_date</code></td><td><code>dim-date</code></td><td><code>Date</code></td><td>Many-to-One</td><td>bothDirections</td><td>oneDirection</td></tr><tr><td><code>fact-sales</code></td><td><code>customer_id</code></td><td><code>dim-product</code></td><td><code>product_id</code></td><td>Many-to-One</td><td>oneDirection</td><td>oneDirection</td></tr></tbody></table>
 <h3>Inactive Relationships</h3>

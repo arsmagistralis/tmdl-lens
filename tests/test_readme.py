@@ -7,6 +7,7 @@ import re
 from tmdl_lens.readme_generator import (
     _build_function_usage_map,
     _esc,
+    _format_dax,
     _md_cell,
     _md_row,
     generate_html,
@@ -14,6 +15,7 @@ from tmdl_lens.readme_generator import (
 )
 from tmdl_lens.source_resolver import resolve_sources
 from tmdl_lens.tmdl_parser import (
+    CalculationItem,
     Column,
     Measure,
     MParameter,
@@ -365,3 +367,70 @@ def test_statistics_agrees_with_summary(sample_model, sample_resolved, gen_confi
         assert columns_count == sum(
             len(tables_by_name[name].columns) for name in item_names
         )
+
+
+def test_format_dax_dedents_continuation_lines():
+    raw = "CALCULATE(\n\t\tSUM(x),\n\t\tFILTER(t, c=1)\n\t)"
+    formatted = _format_dax(raw)
+    for line in formatted.splitlines():
+        assert not line.startswith("\t"), line
+    assert "CALCULATE(" in formatted
+    assert "    SUM(x)" in formatted
+    assert "    FILTER(t, c=1)" in formatted
+
+
+def test_calculated_column_block_indents_every_line():
+    dax = "IF(\n\t\tA,\n\t\tB\n\t)"
+    col = Column(name="Flag", data_type="boolean", is_calculated=True, dax_expression=dax)
+    table = Table(name="T", table_type="fact", columns=[col])
+    model = SemanticModel(report_name="R", tables=[table])
+    readme = generate_readme(model, {}, {"report_name": "R", "include_dax": True})
+    block = readme.split("  ```dax\n", 1)[1].split("\n  ```", 1)[0]
+    for line in block.splitlines():
+        assert line.startswith("  "), repr(line)
+        assert "\t" not in line, repr(line)
+    assert "IF(" in block
+
+
+def test_function_usage_map_scans_columns_roles_and_functions():
+    add_tax = UserFunction(name="AddTax", expression="x")
+    half = UserFunction(name="Half", expression="AddTax([x]) / 2")
+    col = Column(name="Taxed", data_type="calculated", is_calculated=True, dax_expression="AddTax([amount])")
+    calc_group = Table(
+        name="CG",
+        table_type="calc_group",
+        calculation_items=[CalculationItem(name="Apply", dax_expression="AddTax(SELECTEDMEASURE())")],
+    )
+    measures = Table(
+        name="M",
+        table_type="measures_only",
+        columns=[col],
+        measures=[Measure(name="Total", dax_expression="SUM([amount])")],
+    )
+    role = SecurityRole(name="Admins", table_filters=[TableFilter(table="M", dax_filter="AddTax([amount]) > 0")])
+    model = SemanticModel(
+        report_name="R",
+        tables=[measures, calc_group],
+        functions=[add_tax, half],
+        security_roles=[role],
+    )
+    usage = _build_function_usage_map(model)
+    assert ("Taxed", "M") in usage["AddTax"]
+    assert ("Apply", "CG") in usage["AddTax"]
+    assert ("Admins", "M") in usage["AddTax"]
+    assert ("Half", "function") in usage["AddTax"]
+    assert "AddTax" not in usage.get("Half", [])
+
+
+def test_show_hidden_option_is_removed():
+    hidden_col = Column(name="Secret", data_type="int64", is_hidden=True)
+    hidden_measure = Measure(name="Hidden Measure", dax_expression="1", is_hidden=True)
+    table = Table(name="T", table_type="fact", columns=[hidden_col], measures=[hidden_measure])
+    model = SemanticModel(report_name="R", tables=[table])
+    config = {"report_name": "R", "include_dax": True, "show_hidden": False}
+    readme = generate_readme(model, {}, config)
+    html = generate_html(model, {}, config)
+    assert "| `Secret`" in readme
+    assert "| `Hidden Measure`" in readme
+    assert "<code>Secret</code>" in html
+    assert "<code>Hidden Measure</code>" in html

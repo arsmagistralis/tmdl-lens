@@ -290,7 +290,7 @@ def generate_json(
     config: dict,
 ) -> str:
     include_dax = config.get("include_dax", True)
-    collected = _collect(model, True)
+    collected = _collect(model)
     filtered = collected["model"]
     combine_lookup = _combine_lookup(model)
 

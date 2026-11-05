@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Marcin Mozol", email = "marcin.mozol@pm.me" }]
+authors = [{ name = "Marcin Mozol" }]
 keywords = ["powerbi", "pbip", "tmdl", "power-bi", "documentation", "dax"]
 classifiers = [
     "Development Status :: 4 - Beta",

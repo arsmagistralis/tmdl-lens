@@ -9,7 +9,7 @@ import hashlib
 import re
 from dataclasses import dataclass, replace
 
-from tmdl_lens.tmdl_parser import SemanticModel, Table
+from tmdl_lens.tmdl_parser import SemanticModel, Table, _dedent
 from tmdl_lens.source_resolver import CONNECTOR_TYPE_LABEL, ResolvedSource, get_table_source
 
 
@@ -90,6 +90,39 @@ def _source_label(rs: ResolvedSource) -> str:
     return label
 
 
+def _format_dax(expression: str) -> str:
+    if not expression or not expression.strip():
+        return expression
+    lines = expression.splitlines()
+    if len(lines) < 2:
+        return expression.strip()
+    first_indent = len(lines[0]) - len(lines[0].lstrip())
+    if first_indent == 0:
+        cont_indents = [len(line) - len(line.lstrip()) for line in lines[1:] if line.strip()]
+        if cont_indents:
+            common = min(cont_indents)
+            if common:
+                trimmed = []
+                for i, line in enumerate(lines):
+                    if i == 0 or not line.strip() or len(line) < common:
+                        trimmed.append(line)
+                    else:
+                        prefix = line[:common]
+                        if prefix.isspace():
+                            trimmed.append(line[common:])
+                        else:
+                            trimmed.append(line)
+                expression = "\n".join(trimmed)
+    else:
+        expression = _dedent(expression)
+    formatted = []
+    for line in expression.splitlines():
+        stripped = line.lstrip("\t ")
+        prefix = line[: len(line) - len(stripped)]
+        formatted.append(prefix.replace("\t", "    ") + stripped)
+    return "\n".join(formatted).strip()
+
+
 # ---------------------------------------------------------------------------
 # Table type display map
 # ---------------------------------------------------------------------------
@@ -115,14 +148,13 @@ def _is_auto_date_table(name: str) -> bool:
     return name.startswith("LocalDateTable_") or name.startswith("DateTableTemplate_")
 
 
-def _collect(model: SemanticModel, show_hidden: bool) -> dict:
+def _collect(model: SemanticModel) -> dict:
     tables = [t for t in model.tables if not _is_auto_date_table(t.name)]
     replaced = replace(model, tables=tables)
     support_types = {"calculated", "field_parameter", "measures_only", "calc_group"}
     loaded = [t for t in tables if t.is_loaded and t.table_type not in support_types]
     support = [t for t in tables if t.is_loaded and t.table_type in support_types]
     staging = [t for t in tables if not t.is_loaded]
-    loaded_visible = [t for t in loaded if not t.is_hidden]
     hidden_tables = [t for t in tables if t.is_loaded and t.is_hidden]
     return {
         "model": replaced,
@@ -130,12 +162,8 @@ def _collect(model: SemanticModel, show_hidden: bool) -> dict:
         "loaded": loaded,
         "support": support,
         "staging": staging,
-        "loaded_visible": loaded_visible,
         "hidden_tables": hidden_tables,
-        "measures": [
-            (t.name, m) for t in tables for m in t.measures
-            if show_hidden or not m.is_hidden
-        ],
+        "measures": [(t.name, m) for t in tables for m in t.measures],
         "all_measures": [(t.name, m) for t in tables for m in t.measures],
         "calc_cols": [c for t in tables for c in t.columns if c.is_calculated],
     }
@@ -788,7 +816,6 @@ def _table_detail_block(
     tables_by_name: dict | None = None,
     hidden_measures_map: dict | None = None,
     hidden_columns_map: dict | None = None,
-    show_hidden: bool = True,
 ) -> str:
     lines = [f"### `{table.name}`", ""]
 
@@ -800,7 +827,7 @@ def _table_detail_block(
     elif table.table_type == "calculated":
         lines.append("**Source:** Calculated (DAX)  ")
         if include_dax and table.dax_partition:
-            lines += ["", "```dax", table.dax_partition, "```"]
+            lines += ["", "```dax", _format_dax(table.dax_partition), "```"]
     elif table.table_type == "field_parameter":
         lines.append("**Source:** Field Parameter  ")
     elif table.table_type == "measures_only":
@@ -811,25 +838,21 @@ def _table_detail_block(
 
     lines.append("")
 
-    all_cols = [c for c in table.columns if not c.is_calculated]
-    if show_hidden:
-        display_cols = all_cols
-    else:
-        display_cols = [c for c in all_cols if not c.is_hidden]
-    if display_cols:
+    plain_cols = [c for c in table.columns if not c.is_calculated]
+    if plain_cols:
         lines += [
             "**Columns**", "",
             "| Column | Type | Format | Summarize By | Source Column | Sort By | Description | Hidden |",
             "|---|---|---|---|---|---|---|---|",
         ]
-        lines += _md_table_rows(_column_rows(display_cols))
+        lines += _md_table_rows(_column_rows(plain_cols))
         lines.append("")
 
-        key_cols = [c.name for c in display_cols if c.is_key]
+        key_cols = [c.name for c in plain_cols if c.is_key]
         if key_cols:
             lines += ["**Key Column:** " + ", ".join(f"`{k}`" for k in key_cols) + "  ", ""]
 
-        cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
+        cat_cols = [(c.name, c.data_category) for c in plain_cols if c.data_category]
         if cat_cols:
             parts = [f"`{name}` = {cat}" for name, cat in cat_cols]
             lines += ["**Data Categories:** " + ", ".join(parts) + "  ", ""]
@@ -839,7 +862,8 @@ def _table_detail_block(
         lines += ["**Calculated Columns**", ""]
         for col in calc_cols:
             if include_dax and col.dax_expression:
-                lines += [f"- **`{col.name}`**", "  ```dax", f"  {col.dax_expression}", "  ```"]
+                indented = "  " + _format_dax(col.dax_expression).replace("\n", "\n  ")
+                lines += [f"- **`{col.name}`**", "  ```dax", indented, "  ```"]
                 if tables_by_name is not None:
                     note = _hidden_reference_note(
                         _find_hidden_references(
@@ -865,22 +889,17 @@ def _table_detail_block(
         ]
         if include_dax:
             for item in table.calculation_items:
-                lines += [f"**`{item.name}`**", "```dax", item.dax_expression, "```", ""]
+                lines += [f"**`{item.name}`**", "```dax", _format_dax(item.dax_expression), "```", ""]
 
-    if show_hidden:
-        display_measures = table.measures[:]
-    else:
-        display_measures = [m for m in table.measures if not m.is_hidden]
-
-    if display_measures:
+    if table.measures:
         lines += ["**Measures**", "", "| Measure | Format | Description | Hidden |", "|---|---|---|---|"]
-        lines += _md_table_rows(_table_measure_rows(display_measures))
+        lines += _md_table_rows(_table_measure_rows(table.measures))
         if include_dax:
             lines.append("")
-            for m in display_measures:
+            for m in table.measures:
                 if not m.dax_expression.strip():
                     continue
-                lines += [f"**`{m.name}`**", "```dax", m.dax_expression, "```", ""]
+                lines += [f"**`{m.name}`**", "```dax", _format_dax(m.dax_expression), "```", ""]
                 if tables_by_name is not None:
                     note = _hidden_reference_note(
                         _find_hidden_references(
@@ -902,20 +921,16 @@ def _table_details_section(
     tables_by_name: dict | None = None,
     hidden_measures_map: dict | None = None,
     hidden_columns_map: dict | None = None,
-    show_hidden: bool = True,
 ) -> str:
     lines = [_md_heading("table_details"), ""]
     detail_support = [
         t for t in support_tables
         if t.table_type in ("calc_group", "calculated", "field_parameter")
     ]
-    if show_hidden:
-        all_tables = loaded_tables + detail_support
-    else:
-        all_tables = [t for t in loaded_tables if not t.is_hidden] + detail_support
+    all_tables = loaded_tables + detail_support
     if all_tables:
         for t in all_tables:
-            lines.append(_table_detail_block(t, resolved, include_dax, tables_by_name, hidden_measures_map, hidden_columns_map, show_hidden))
+            lines.append(_table_detail_block(t, resolved, include_dax, tables_by_name, hidden_measures_map, hidden_columns_map))
             lines += ["---", ""]
     else:
         lines += ["*No loaded tables.*", "", "---", ""]
@@ -962,7 +977,7 @@ def _measures_section(measures: list, include_dax: bool) -> str:
             for _, m in items:
                 if not m.dax_expression.strip():
                     continue
-                lines += [f"**`{m.name}`**", "```dax", m.dax_expression, "```", ""]
+                lines += [f"**`{m.name}`**", "```dax", _format_dax(m.dax_expression), "```", ""]
 
     lines.append(_measure_format_string_inventory(measures))
     lines += ["---", ""]
@@ -971,14 +986,31 @@ def _measures_section(measures: list, include_dax: bool) -> str:
 
 def _build_function_usage_map(model: SemanticModel) -> dict:
     usage: dict = {}
+
+    def _scan(name: str, context: str, expression: str, skip: set[str] | None = None) -> None:
+        skip = skip or set()
+        for fn in model.functions:
+            if fn.name in skip:
+                continue
+            if re.search(
+                r"(?:'" + re.escape(fn.name) + r"'|\b" + re.escape(fn.name) + r")\s*\(",
+                expression,
+            ):
+                usage.setdefault(fn.name, []).append((name, context))
+
     for t in model.tables:
         for m in t.measures:
-            for fn in model.functions:
-                if re.search(
-                    r"(?:'" + re.escape(fn.name) + r"'|\b" + re.escape(fn.name) + r")\s*\(",
-                    m.dax_expression,
-                ):
-                    usage.setdefault(fn.name, []).append((m.name, t.name))
+            _scan(m.name, t.name, m.dax_expression)
+        for c in t.columns:
+            if c.is_calculated:
+                _scan(c.name, t.name, c.dax_expression)
+        for item in t.calculation_items:
+            _scan(item.name, t.name, item.dax_expression)
+    for role in model.security_roles:
+        for tf in role.table_filters:
+            _scan(role.name, tf.table, tf.dax_filter)
+    for fn in model.functions:
+        _scan(fn.name, "function", fn.expression, skip={fn.name})
     return usage
 
 
@@ -996,7 +1028,7 @@ def _functions_section(model: SemanticModel, include_dax: bool) -> str:
         for fn in model.functions:
             if not fn.expression.strip():
                 continue
-            lines += [f"**`{fn.name}`**", "```dax", fn.expression, "```", ""]
+            lines += [f"**`{fn.name}`**", "```dax", _format_dax(fn.expression), "```", ""]
 
     lines += ["---", ""]
     return "\n".join(lines)
@@ -1437,7 +1469,6 @@ class _HtmlContext:
     resolved: dict
     config: dict
     include_dax: bool
-    show_hidden: bool
     collected: dict
     refs: tuple
 
@@ -1491,10 +1522,7 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
         t for t in ctx.collected["support"]
         if t.table_type in ("calc_group", "calculated", "field_parameter")
     ]
-    if ctx.show_hidden:
-        table_detail_tables = ctx.collected["loaded"] + detail_support
-    else:
-        table_detail_tables = ctx.collected["loaded_visible"] + detail_support
+    table_detail_tables = ctx.collected["loaded"] + detail_support
     if not table_detail_tables:
         body.append('<p class="empty">No loaded tables.</p>')
     for t in table_detail_tables:
@@ -1506,27 +1534,24 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
         elif t.table_type == "calculated":
             body.append('<p><strong>Source:</strong> Calculated (DAX)</p>')
             if ctx.include_dax and t.dax_partition:
-                body.append(_pre(t.dax_partition))
+                body.append(_pre(_format_dax(t.dax_partition)))
         elif t.table_type == "field_parameter":
             body.append('<p><strong>Source:</strong> Field Parameter</p>')
         elif t.table_type == "measures_only":
             body.append('<p><strong>Source:</strong> Measures only - no data source</p>')
         if t.is_hidden:
             body.append('<p><strong>Hidden:</strong> Yes</p>')
-        if ctx.show_hidden:
-            display_cols = [c for c in t.columns if not c.is_calculated]
-        else:
-            display_cols = [c for c in t.columns if not c.is_calculated and not c.is_hidden]
-        if display_cols:
+        plain_cols = [c for c in t.columns if not c.is_calculated]
+        if plain_cols:
             body.append('<h4>Columns</h4>')
             body.append(_html_table(
                 ["Column", "Type", "Format", "Summarize By", "Source Column", "Sort By", "Description", "Hidden"],
-                _html_rows(_column_rows(display_cols))))
-            key_cols = [c.name for c in display_cols if c.is_key]
+                _html_rows(_column_rows(plain_cols))))
+            key_cols = [c.name for c in plain_cols if c.is_key]
             if key_cols:
                 body.append('<p><strong>Key Column:</strong> '
                             + ", ".join(_code(k) for k in key_cols) + '</p>')
-            cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
+            cat_cols = [(c.name, c.data_category) for c in plain_cols if c.data_category]
             if cat_cols:
                 body.append('<p><strong>Data Categories:</strong> '
                             + ", ".join(f"{_code(n)} = {_esc(cat)}" for n, cat in cat_cols)
@@ -1537,7 +1562,7 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
             for col in calc_cols:
                 body.append(f'<p><strong>{_code(col.name)}</strong></p>')
                 if ctx.include_dax and col.dax_expression:
-                    body.append(_pre(col.dax_expression))
+                    body.append(_pre(_format_dax(col.dax_expression)))
                     body += _html_hidden_note(col.dax_expression, ctx.refs)
         if t.calculation_items:
             body.append('<h4>Calculation Items</h4>')
@@ -1547,21 +1572,17 @@ def _html_table_details(ctx: _HtmlContext) -> list[str]:
             if ctx.include_dax:
                 for item in t.calculation_items:
                     body.append(f'<h4>{_code(item.name)}</h4>')
-                    body.append(_pre(item.dax_expression))
-        if ctx.show_hidden:
-            display_measures = t.measures[:]
-        else:
-            display_measures = [m for m in t.measures if not m.is_hidden]
-        if display_measures:
+                    body.append(_pre(_format_dax(item.dax_expression)))
+        if t.measures:
             body.append('<h4>Measures</h4>')
             body.append(_html_table(["Measure", "Format", "Description", "Hidden"],
-                                    _html_rows(_table_measure_rows(display_measures))))
+                                    _html_rows(_table_measure_rows(t.measures))))
             if ctx.include_dax:
-                for m in display_measures:
+                for m in t.measures:
                     if not m.dax_expression.strip():
                         continue
                     body.append(f'<h4>{_code(m.name)}</h4>')
-                    body.append(_pre(m.dax_expression))
+                    body.append(_pre(_format_dax(m.dax_expression)))
                     body += _html_hidden_note(m.dax_expression, ctx.refs)
     column_pairs = _column_format_pairs(ctx.collected["loaded"] + ctx.collected["support"])
     if column_pairs:
@@ -1584,7 +1605,7 @@ def _html_measures(ctx: _HtmlContext) -> list[str]:
                     if not m.dax_expression.strip():
                         continue
                     body.append(f'<h4>{_code(m.name)}</h4>')
-                    body.append(_pre(m.dax_expression))
+                    body.append(_pre(_format_dax(m.dax_expression)))
         body.append(_html_fmt_inventory_table(
             "Measure Format Strings", _measure_format_pairs(all_measures), "Measures"
         ))
@@ -1602,7 +1623,7 @@ def _html_functions(ctx: _HtmlContext) -> list[str]:
             if not fn.expression.strip():
                 continue
             body.append(f'<h4>{_code(fn.name)}</h4>')
-            body.append(_pre(fn.expression))
+            body.append(_pre(_format_dax(fn.expression)))
     return body
 
 
@@ -1688,16 +1709,14 @@ def generate_html(
 ) -> str:
     report_name = config.get("report_name", model.report_name)
     include_dax = config.get("include_dax", True)
-    show_hidden = config.get("show_hidden", True)
 
-    collected = _collect(model, show_hidden)
+    collected = _collect(model)
     model = collected["model"]
     ctx = _HtmlContext(
         model=model,
         resolved=resolved,
         config=config,
         include_dax=include_dax,
-        show_hidden=show_hidden,
         collected=collected,
         refs=_build_hidden_reference_map(model),
     )
@@ -1733,9 +1752,8 @@ def generate_readme(
 ) -> str:
     report_name = config.get("report_name", model.report_name)
     include_dax = config.get("include_dax", True)
-    show_hidden = config.get("show_hidden", True)
 
-    collected = _collect(model, show_hidden)
+    collected = _collect(model)
     model = collected["model"]
     loaded = collected["loaded"]
     support = collected["support"]
@@ -1747,7 +1765,7 @@ def generate_readme(
     renderers = {
         "overview":       lambda: _overview_section(config, model),
         "data_sources":   lambda: _data_sources_section(loaded, staging, support, resolved, model, lineage),
-        "table_details":  lambda: _table_details_section(loaded, support, resolved, include_dax, ref_tables, ref_measures, ref_columns, show_hidden),
+        "table_details":  lambda: _table_details_section(loaded, support, resolved, include_dax, ref_tables, ref_measures, ref_columns),
         "measures":       lambda: _measures_section(collected["measures"], include_dax),
         "functions":      lambda: _functions_section(model, include_dax),
         "relationships":  lambda: _relationships_section(model),
@@ -1772,7 +1790,6 @@ class _TextContext:
     resolved: dict
     config: dict
     include_dax: bool
-    show_hidden: bool
     collected: dict
     refs: tuple
 
@@ -1891,24 +1908,23 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
         source_lines = ["Source: Measures only - no data source"]
     paras.append(source_lines)
     if dax_partition:
-        paras.append(_text_dax(dax_partition))
+        paras.append(_text_dax(_format_dax(dax_partition)))
     flags = []
     if table.is_hidden:
         flags.append("Hidden: Yes")
     paras.append(flags)
 
-    all_cols = [c for c in table.columns if not c.is_calculated]
-    display_cols = all_cols if ctx.show_hidden else [c for c in all_cols if not c.is_hidden]
-    if display_cols:
+    plain_cols = [c for c in table.columns if not c.is_calculated]
+    if plain_cols:
         paras.append(["Columns"])
         paras.append(_text_table(
             ["Column", "Type", "Format", "Summarize By", "Source Column", "Sort By", "Description", "Hidden"],
-            _column_rows(display_cols)))
+            _column_rows(plain_cols)))
         extra = []
-        key_cols = [c.name for c in display_cols if c.is_key]
+        key_cols = [c.name for c in plain_cols if c.is_key]
         if key_cols:
             extra.append("Key Column: " + ", ".join(key_cols))
-        cat_cols = [(c.name, c.data_category) for c in display_cols if c.data_category]
+        cat_cols = [(c.name, c.data_category) for c in plain_cols if c.data_category]
         if cat_cols:
             extra.append("Data Categories: " + ", ".join(f"{name} = {cat}" for name, cat in cat_cols))
         paras.append(extra)
@@ -1919,7 +1935,7 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
         for col in calc_cols:
             paras.append([f"- {col.name}"])
             if ctx.include_dax and col.dax_expression:
-                paras.append(_text_dax(col.dax_expression))
+                paras.append(_text_dax(_format_dax(col.dax_expression)))
                 paras += _text_hidden_note(col.dax_expression, ctx.refs)
 
     if table.calculation_items:
@@ -1933,18 +1949,17 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
         if ctx.include_dax:
             for item in table.calculation_items:
                 paras.append([item.name])
-                paras.append(_text_dax(item.dax_expression))
+                paras.append(_text_dax(_format_dax(item.dax_expression)))
 
-    display_measures = table.measures[:] if ctx.show_hidden else [m for m in table.measures if not m.is_hidden]
-    if display_measures:
+    if table.measures:
         paras.append(["Measures"])
-        paras.append(_text_table(["Measure", "Format", "Description", "Hidden"], _table_measure_rows(display_measures)))
+        paras.append(_text_table(["Measure", "Format", "Description", "Hidden"], _table_measure_rows(table.measures)))
         if ctx.include_dax:
-            for m in display_measures:
+            for m in table.measures:
                 if not m.dax_expression.strip():
                     continue
                 paras.append([m.name])
-                paras.append(_text_dax(m.dax_expression))
+                paras.append(_text_dax(_format_dax(m.dax_expression)))
                 paras += _text_hidden_note(m.dax_expression, ctx.refs)
     return paras
 
@@ -1956,10 +1971,7 @@ def _text_table_details(ctx: _TextContext) -> list[list[str]]:
         t for t in support
         if t.table_type in ("calc_group", "calculated", "field_parameter")
     ]
-    if ctx.show_hidden:
-        tables = loaded + detail_support
-    else:
-        tables = ctx.collected["loaded_visible"] + detail_support
+    tables = loaded + detail_support
     paras = [_text_heading("table_details")]
     if not tables:
         paras.append(["No loaded tables."])
@@ -1983,7 +1995,7 @@ def _text_measures(ctx: _TextContext) -> list[list[str]]:
                 if not m.dax_expression.strip():
                     continue
                 paras.append([m.name])
-                paras.append(_text_dax(m.dax_expression))
+                paras.append(_text_dax(_format_dax(m.dax_expression)))
     paras += _text_inventory(_measure_format_pairs(measures), "Measure Format Strings", "Measures")
     return paras
 
@@ -1999,7 +2011,7 @@ def _text_functions(ctx: _TextContext) -> list[list[str]]:
             if not fn.expression.strip():
                 continue
             paras.append([fn.name])
-            paras.append(_text_dax(fn.expression))
+            paras.append(_text_dax(_format_dax(fn.expression)))
     return paras
 
 
@@ -2084,16 +2096,14 @@ def generate_text(
 ) -> str:
     report_name = config.get("report_name", model.report_name)
     include_dax = config.get("include_dax", True)
-    show_hidden = config.get("show_hidden", True)
 
-    collected = _collect(model, show_hidden)
+    collected = _collect(model)
     model = collected["model"]
     ctx = _TextContext(
         model=model,
         resolved=resolved,
         config=config,
         include_dax=include_dax,
-        show_hidden=show_hidden,
         collected=collected,
         refs=_build_hidden_reference_map(model),
     )

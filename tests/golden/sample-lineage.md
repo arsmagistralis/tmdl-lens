@@ -267,10 +267,10 @@ CALENDARAUTO()
 - **`PriorYearFlag`**
   ```dax
   IF(
-				YEAR('dim-date'[Date]) = YEAR(TODAY()) - 1,
-				TRUE(),
-				FALSE()
-			)
+      YEAR('dim-date'[Date]) = YEAR(TODAY()) - 1,
+      TRUE(),
+      FALSE()
+  )
   ```
 
 ---
@@ -375,7 +375,7 @@ COUNTROWS('helper-order-lookup')
 **`SafeStockThreshold`**
 ```dax
 (category: string) =>
-		IF(category == "Hardware", 50, 20)
+IF(category == "Hardware", 50, 20)
 ```
 
 ---
