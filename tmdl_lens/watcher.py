@@ -38,13 +38,17 @@ def _find_pbip_for_tmdl(tmdl_path: str) -> str | None:
     Strategy: keep going up until we find a folder ending in '.SemanticModel',
     then look for a .pbip sibling in the parent directory.
     """
-    parts = os.path.normpath(tmdl_path).split(os.sep)
+    current = os.path.normpath(tmdl_path)
 
-    for i, part in enumerate(parts):
-        if part.endswith(".SemanticModel"):
-            parent = os.sep.join(parts[:i])
-            report_name = part[: -len(".SemanticModel")]
-            candidate = os.path.join(parent, report_name + ".pbip")
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+        base = os.path.basename(current)
+        if base.endswith(".SemanticModel"):
+            report_name = base[: -len(".SemanticModel")]
+            candidate = os.path.join(os.path.dirname(current), report_name + ".pbip")
             if os.path.exists(candidate):
                 return candidate
             break
@@ -73,18 +77,23 @@ if WATCHER_AVAILABLE:
         def on_created(self, event):
             self._handle(event)
 
-        def _handle(self, event):
+        def on_deleted(self, event):
+            self._handle(event)
+
+        def on_moved(self, event):
+            self._handle(event, event.dest_path)
+
+        def _handle(self, event, path=None):
             if event.is_directory:
                 return
-            if not event.src_path.endswith(".tmdl"):
+            path = path or event.src_path
+            if not path.endswith(".tmdl"):
                 return
 
-            pbip = _find_pbip_for_tmdl(event.src_path)
+            pbip = _find_pbip_for_tmdl(path)
             if pbip is None:
                 return
 
-            # Cancel any pending timer for this report, then start a new one.
-            # This means rapid saves only trigger one run after the dust settles.
             with self._lock:
                 existing = self._timers.get(pbip)
                 if existing:
@@ -96,7 +105,10 @@ if WATCHER_AVAILABLE:
         def _fire(self, pbip: str):
             with self._lock:
                 self._timers.pop(pbip, None)
-            self._callback(pbip)
+            try:
+                self._callback(pbip)
+            except Exception:
+                pass
 
         def cancel_all(self):
             with self._lock:
