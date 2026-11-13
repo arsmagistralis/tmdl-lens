@@ -5,11 +5,15 @@ test_readme.py - pytest tests for the Markdown/HTML generators.
 import re
 
 from tmdl_lens.readme_generator import (
+    _TEXT_CELL_WIDTH,
+    _TEXT_LINE_WIDTH,
     _build_function_usage_map,
     _esc,
     _format_dax,
     _md_cell,
     _md_row,
+    _text_table,
+    _text_wrap,
     generate_html,
     generate_readme,
 )
@@ -434,3 +438,52 @@ def test_show_hidden_option_is_removed():
     assert "| `Hidden Measure`" in readme
     assert "<code>Secret</code>" in html
     assert "<code>Hidden Measure</code>" in html
+
+
+def test_text_table_wraps_long_cell_at_space():
+    headers = ["A", "B"]
+    rows = [(" ".join(["item"] * 30), " ".join(["word"] * 30))]
+    lines = _text_table(headers, rows)
+    assert len(lines) > 3
+    for line in lines:
+        assert not line.endswith(" ")
+    b_offset = lines[0].index("B")
+    for line in lines[2:]:
+        assert line[b_offset:b_offset + 4] == "word"
+
+
+def test_text_table_hard_breaks_long_token():
+    headers = ["Token"]
+    rows = [("a" * 100,)]
+    lines = _text_table(headers, rows)
+    assert lines[0] == "Token"
+    assert lines[1] == "-" * _TEXT_CELL_WIDTH
+    assert lines[2] == "a" * _TEXT_CELL_WIDTH
+    assert lines[3] == "a" * 40
+    assert lines[2] + lines[3] == "a" * 100
+
+
+def test_text_table_wrap_keeps_neighbouring_cells_aligned():
+    headers = ["Left", "Right"]
+    rows = [(" ".join(["alpha"] * 20), " ".join(["beta"] * 20))]
+    lines = _text_table(headers, rows)
+    assert len(lines) > 3
+    right_offset = lines[0].index("Right")
+    for line in lines[2:]:
+        assert line[right_offset:right_offset + 1] != " "
+
+
+def test_text_table_lines_have_no_leading_or_trailing_spaces():
+    lines = _text_table(["Column"], [("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen",)])
+    assert len(lines) > 3
+    for line in lines:
+        assert not line.startswith(" ")
+        assert not line.endswith(" ")
+
+
+def test_text_wrap_wraps_prose_at_100_and_keeps_words_intact():
+    words = ["word"] * 50
+    text = " ".join(words)
+    segments = _text_wrap(text, _TEXT_LINE_WIDTH)
+    assert all(len(s) <= _TEXT_LINE_WIDTH for s in segments)
+    assert " ".join(segments) == text

@@ -17,6 +17,9 @@ from tmdl_lens.source_resolver import CONNECTOR_TYPE_LABEL, ResolvedSource, get_
 # Data type display map
 # ---------------------------------------------------------------------------
 
+_TEXT_CELL_WIDTH = 60
+_TEXT_LINE_WIDTH = 100
+
 _DTYPE = {
     "string":     "Text",
     "int64":      "Integer",
@@ -1814,14 +1817,65 @@ def _text_cell(cell) -> str:
     return _text_flat(cell)
 
 
+def _text_wrap(text: str, width: int = _TEXT_CELL_WIDTH) -> list[str]:
+    cap = width
+    tokens = text.split()
+    segments: list[str] = []
+    current = ""
+    for token in tokens:
+        if not current:
+            if len(token) > cap:
+                for i in range(0, len(token), cap):
+                    chunk = token[i:i + cap]
+                    if i + cap < len(token):
+                        segments.append(chunk)
+                    else:
+                        current = chunk
+            else:
+                current = token
+        elif len(current) + 1 + len(token) <= cap:
+            current += " " + token
+        else:
+            segments.append(current)
+            if len(token) > cap:
+                for i in range(0, len(token), cap):
+                    chunk = token[i:i + cap]
+                    if i + cap < len(token):
+                        segments.append(chunk)
+                    else:
+                        current = chunk
+            else:
+                current = token
+    if current or not segments:
+        segments.append(current)
+    return segments
+
+
 def _text_table(headers: list[str], rows: list) -> list[str]:
-    cells = [[_text_cell(cell) for cell in row] for row in rows]
-    widths = [max([len(h)] + [len(r[i]) for r in cells]) for i, h in enumerate(headers)]
+    header_rows = [_text_wrap(h) for h in headers]
+    data_rows = [[_text_wrap(_text_cell(cell)) for cell in row] for row in rows]
+    widths = []
+    for i, header_segments in enumerate(header_rows):
+        column_widths = [max((len(s) for s in header_segments), default=0)]
+        for data_row in data_rows:
+            column_widths.append(max((len(s) for s in data_row[i]), default=0))
+        widths.append(max(column_widths))
 
-    def line(values):
-        return "  ".join(v.ljust(w) for v, w in zip(values, widths)).rstrip()
+    def render_row(row):
+        height = max(len(cell) for cell in row)
+        physical = []
+        for line_index in range(height):
+            segments = []
+            for column_index, cell in enumerate(row):
+                segment = cell[line_index] if line_index < len(cell) else ""
+                segments.append(segment.ljust(widths[column_index]))
+            physical.append("  ".join(segments).rstrip())
+        return physical
 
-    return [line(headers), line(["-" * w for w in widths]), *(line(r) for r in cells)]
+    header_lines = render_row(header_rows)
+    separator = "  ".join("-" * w for w in widths).rstrip()
+    body_lines = [line for row in data_rows for line in render_row(row)]
+    return header_lines + [separator] + body_lines
 
 
 def _text_underlined(title: str, char: str) -> list[str]:
@@ -1841,7 +1895,7 @@ def _text_dax(expression: str) -> list[str]:
 
 def _text_hidden_note(dax_expression: str, refs: tuple) -> list[list[str]]:
     note = _hidden_reference_note(_find_hidden_references(dax_expression, *refs))
-    return [[_text_plain(note)]] if note else []
+    return [_text_wrap(_text_plain(note), _TEXT_LINE_WIDTH)] if note else []
 
 
 def _text_inventory(pairs: list, heading: str, items_header: str) -> list[list[str]]:
@@ -1867,7 +1921,7 @@ def _text_data_sources(ctx: _TextContext) -> list[list[str]]:
     staging = ctx.collected["staging"]
     paras = [
         _text_heading("data_sources"),
-        [_model_summary(loaded, staging, support, ctx.model)],
+        _text_wrap(_model_summary(loaded, staging, support, ctx.model), _TEXT_LINE_WIDTH),
     ]
     if loaded:
         paras.append(_text_table(["Table", "Source Type", "Source"],
@@ -1941,11 +1995,12 @@ def _text_table_block(table: Table, ctx: _TextContext) -> list[list[str]]:
     if table.calculation_items:
         paras.append(["Calculation Items"])
         paras.append(_text_table(["Item", "Ordinal", "Format String"], _calc_item_rows(table.calculation_items)))
-        paras.append([
+        paras.append(_text_wrap(
             "Calculation items can be applied to any measure at report-build time "
             "(via SELECTEDMEASURE()). TMDL has no static record of which measures "
-            "a given item is actually used with."
-        ])
+            "a given item is actually used with.",
+            _TEXT_LINE_WIDTH,
+        ))
         if ctx.include_dax:
             for item in table.calculation_items:
                 paras.append([item.name])
